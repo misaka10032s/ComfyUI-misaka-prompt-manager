@@ -1,0 +1,39 @@
+我正在使用comfyUI來產生一系列圖片，但是管理prompt卻成一大問題，我現在使用的workflow大致上相同，只是想產生不同角色時會用到不同的lora和不同的角色形容詞prompt，甚至連checkpoint也有可能不同(根據lora)，現在我是用/{checkpointName}/{角色分類}/{角色名字}/{動作場景} 這樣用一堆資料夾分類，但這樣有點亂。我需要一個custom node，可以讓分類簡化成 {角色分類}/{角色名字} 然後使用那個node來切換不同的checkpoint + lora + outputName，其中lora可能會需要串接多個，也要保留原是的strenth model & clip參數，語言用python
+
+現在的流程是: load checkpoint -> load lora(s) -> set prompt -> KSampler -> upscale -> KSampler - VAE decode -> save image
+我想簡化成: load prompt node (my custom node) -> KSampler -> upscale -> KSampler - VAE decode -> save image
+my custom node需要包含checkpoint + lora(s) + prompt 然後  也要拉一條線到 save image 的 output name
+checkpoint 和 lora 的下拉選項要跟原本的一樣從``和``取得，且lora要保留strenth model & clip參數，且可以多選
+custom output point要有: MODEL, CLIP, VAE, TEXT
+
+
+
+node檔案位置: ComfyUI_windows_portable\ComfyUI\custom_nodes\ComfyUI-misaka-prompt-manager\...
+
+我希望這個node存的資料會在外部workflows資料夾底下的檔案，而不是跟node程式碼放在一起
+
+
+
+ComfyUI_windows_portable\ComfyUI\custom_nodes\ComfyUI-misaka-prompt-manager\__init__.py
+ComfyUI_windows_portable\ComfyUI\user\default\workflows\**\*.json
+
+
+
+目前看起來都已完成，現在我想知道能不能把多個prompts組合起來一個node自動concat，變成有多個輸入框在同一個node block，還可以靈活增減輸入框數量，然後把這些prompts concat起來成為最終的prompt輸出到KSampler，他的input 是CLIP, output是CONDITIONING
+另外我想要output_name 前面自動代model name，像是 若選擇model = qweasdV123.safetensors, output_name = 角色分類/角色名字_%Seed.seed%, output_name = qweasdV123/角色分類/角色名字_%Seed.seed% 這樣子，如果output_name第一個字元是/的話就不加model name
+
+
+到時候程式所在的路徑是`ComfyUI\user\default\workflows`，現在先放這個project的root就好
+我需要你寫一個python把 `ComfyUI\user\default\workflows\boleromixPony_v210 & novaAnimeXL_ilV140`裡的所有json，用`ComfyUI\user\default\misaka-prompt-sets\test.json`的格式，儲存在`ComfyUI\user\default\misaka-prompt-sets`
+workflows.json格式(只列出需要的部分): {nodes:[nodeObjs...]}
+test.json keys:
+checkpoint: nodeObjs.widgets_values[0] if nodeObjs.type == "CheckpointLoaderSimple"
+loras: [all nodeObjs.widgets_values[0] if nodeObjs.type == "LoraLoader"]
+character: nodeObjs.widgets_values[0] if nodeObjs.title == "角色設定"
+H: nodeObjs.widgets_values[0] if nodeObjs.title == "色色"
+expression: nodeObjs.widgets_values[0] if nodeObjs.title == "表情姿勢"
+scene: nodeObjs.widgets_values[0] if nodeObjs.title == "其他場景"
+output_name: nodeObjs.widgets_values[0][nodeObjs.widgets_values[0].indexof('/'):] if nodeObjs.type == "SaveImage"，就是 asd/qwe/zxc 要變成 qwe/zxc的意思
+
+
+現在需要找出 `default\misaka-prompt-sets` 裡面所有json 的 note，抓出所有"https://civitai.com"開頭的網址，然後利用 checkModelType.py 判斷model type，可能的值為"pony"和"Illustrious"，而pony的checkpoint會像這樣 "boleromixPony_v210" 有 pony(不分大小寫)字樣，而Illustrious的都是"novaAnimeXL_ilV140"，需要檢查是否符合，只要有一個不符合就列出來: `xxx.json: model type mismatch: expected {expected_type}, got {actual_type}`

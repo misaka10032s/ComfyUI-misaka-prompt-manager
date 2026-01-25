@@ -1,0 +1,24 @@
+{
+  "checkpoint": "v1-5-pruned-emaonly.ckpt",
+  "loras": [
+    {
+      "name": "example_lora.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 1.0
+    },
+    {
+      "name": "another_lora.safetensors",
+      "strength_model": 0.5,
+      "strength_clip": 0.5
+    }
+  ],
+  "character": "masterpiece, best quality, 1girl, solo",
+  "H": "medium breasts, cleavage",
+  "expression": "smile, happy",
+  "pose": "standing, arms raised",
+  "scene": "outdoor, sunny, park",
+  "negative": "low quality, bad hands, text, watermark",
+  "output_name": "MyCharacter/Action1",
+  "clip_skip": 0,
+  "note": "This is an example profile for testing."
+}

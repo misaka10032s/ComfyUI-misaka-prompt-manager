@@ -1,0 +1,43 @@
+# IDE and OS specific
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Environments
+backend/venv/
+frontend/node_modules/
+nodejs/
+
+# Secrets - IMPORTANT
+# Environments
+.env
+.env.*
+
+# Databases
+/db/
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
+
+# Backend
+/backend/__pycache__/
+/backend/.venv/
+
+# Build artifacts
+frontend/dist/
+*.pyc
+__pycache__/
+
+# Local Database
+# Be careful if you have initial data that needs to be versioned.
+# Generally, local data should be ignored.
+db/data/
+
+# Log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
