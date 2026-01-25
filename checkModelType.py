@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 import os
+import json
+import re
 
 headers = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
@@ -50,10 +52,61 @@ def find_model_type(url):
         return find_model_type_from_soup(soup)
     return None
 
+def extract_civitai_urls(text):
+    if not text:
+        return []
+    return re.findall(r'(https://civitai\.com[^\s\u4e00-\u9fa5]*)', text)
+
 if __name__ == "__main__":
     # test_url = "https://civitai.com/models/481234/andromeda-fate-grand-order-xl"
     # model_type = find_model_type(test_url)
     # print(f"Model type for {test_url}: {model_type}")
     
-    # do your work here, do not remove above test code
-    pass
+    # Path configuration
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    COMFY_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "../../"))
+    MISAKA_SETS_DIR = os.path.join(COMFY_ROOT, "user", "default", "misaka-prompt-sets")
+    
+    ILLUSTRIOUS_KEYWORD = "Illustrious"
+    PONY_KEYWORD = "Pony"
+    ILLUSTRIOUS_CHECKPOINT = "novaAnimeXL_ilV140"
+    PONY_CHECKPOINT_KEYWORD = "pony"
+
+    if os.path.exists(MISAKA_SETS_DIR):
+        for root, dirs, files in os.walk(MISAKA_SETS_DIR):
+            for filename in files:
+                if filename.endswith(".json"):
+                    full_path = os.path.join(root, filename)
+                    rel_path = os.path.relpath(full_path, MISAKA_SETS_DIR)
+                    
+                    try:
+                        with open(full_path, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                    except Exception as e:
+                        print(f"Error reading {rel_path}: {e}")
+                        continue
+
+                    note = data.get("note", "")
+                    checkpoint = data.get("checkpoint", "")
+                    urls = extract_civitai_urls(note)
+                    
+                    for url in urls:
+                        try:
+                            model_type = find_model_type(url)
+                            if not model_type:
+                                continue
+                            
+                            is_pony_web = PONY_KEYWORD.lower() in model_type.lower()
+                            is_illustrious_web = ILLUSTRIOUS_KEYWORD.lower() in model_type.lower()
+                            
+                            if is_pony_web:
+                                if PONY_CHECKPOINT_KEYWORD.lower() not in checkpoint.lower():
+                                    print(f"{rel_path}: model type mismatch: expected Pony (checkpoint should contain '{PONY_CHECKPOINT_KEYWORD}'), got '{checkpoint}' (Web Type: {model_type})")
+                            elif is_illustrious_web:
+                                if ILLUSTRIOUS_CHECKPOINT not in checkpoint:
+                                    print(f"{rel_path}: model type mismatch: expected Illustrious (checkpoint should be '{ILLUSTRIOUS_CHECKPOINT}'), got '{checkpoint}' (Web Type: {model_type})")
+                                    
+                        except Exception as e:
+                            print(f"Error checking URL {url} in {rel_path}: {e}")
+    else:
+        print(f"Directory not found: {MISAKA_SETS_DIR}")
