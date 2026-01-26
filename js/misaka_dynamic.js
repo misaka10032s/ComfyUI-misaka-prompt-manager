@@ -169,6 +169,28 @@ app.registerExtension({
                     });
                 };
 
+                const syncSaveAsFilename = () => {
+                     const sel = self.widgets.find(w => w.name === "profile_selector");
+                     const saveAs = self.widgets.find(w => w.name === "save_as_profile");
+                     const ckptWidget = self.widgets.find(w => w.name === "checkpoint");
+
+                     if (sel && saveAs && sel.value && sel.value !== "Loading..." && sel.value !== "None") {
+                         let val = sel.value;
+                         if (ckptWidget && ckptWidget.value) {
+                             const ckptName = ckptWidget.value;
+                             const lastDot = ckptName.lastIndexOf('.');
+                             const stem = lastDot > 0 ? ckptName.substring(0, lastDot) : ckptName;
+                             
+                             if (val.startsWith(stem + "/")) {
+                                 val = val.substring(stem.length + 1);
+                             } else if (val.startsWith(stem + "\\")) {
+                                 val = val.substring(stem.length + 1);
+                             }
+                         }
+                         saveAs.value = val;
+                     }
+                };
+
                 // --- UI Construction ---
                 
                 // 1. Save & Load Buttons
@@ -186,13 +208,7 @@ app.registerExtension({
                 const selector = this.addWidget("combo", "profile_selector", "Loading...", () => {}, { values: ["Loading..."] });
                 
                 // 3. Overwrite Button
-                const overwriteBtn = this.addWidget("button", "Overwrite Filename", null, () => {
-                     const sel = self.widgets.find(w => w.name === "profile_selector");
-                     const saveAs = self.widgets.find(w => w.name === "save_as_profile");
-                     if (sel && saveAs && sel.value && sel.value !== "Loading..." && sel.value !== "None") {
-                         saveAs.value = sel.value;
-                     }
-                });
+                const overwriteBtn = this.addWidget("button", "Overwrite Filename", null, syncSaveAsFilename);
 
                 // --- Reorder Widgets ---
                 // Pop newly added widgets (Reverse order of creation)
@@ -298,6 +314,7 @@ app.registerExtension({
                             node.setSize([currentWidth, minH]);
                             
                             app.graph.setDirtyCanvas(true, true);
+                            syncSaveAsFilename();
                             // alert(`Loaded profile: ${profileName}`); // Remove alert for better UX? User knows.
                         })
                         .catch(e => {

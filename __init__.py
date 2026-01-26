@@ -48,7 +48,21 @@ async def save_profile(request):
             return web.Response(status=400, text="Missing filename or data")
             
         base = get_storage_path()
-        save_path = os.path.join(base, filename + ".json")
+        
+        # Determine path based on checkpoint
+        if filename.startswith("/") or filename.startswith("\\"):
+            # Absolute relative to base (remove leading slash)
+            relative_save_path = filename.lstrip("/").lstrip("\\")
+        else:
+            # Prefix with checkpoint name
+            ckpt_name = profile_data.get("checkpoint", "")
+            if ckpt_name:
+                model_stem = os.path.splitext(os.path.basename(ckpt_name))[0]
+                relative_save_path = os.path.join(model_stem, filename)
+            else:
+                relative_save_path = filename
+
+        save_path = os.path.join(base, relative_save_path + ".json")
         
         # Ensure directory exists
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
