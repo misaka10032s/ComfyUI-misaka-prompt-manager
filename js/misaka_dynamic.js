@@ -41,10 +41,130 @@ app.registerExtension({
                 hideMisakaWidgets(this); 
                 
                 const self = this;
+                let allFiles = []; // Cache all files for filtering
 
-                // --- Load Profile 功能 ---
+                // --- Helper Logic ---
+
+                const saveProfileData = () => {
+                    const getVal = (name) => {
+                        const w = self.widgets.find(x => x.name === name);
+                        return w ? w.value : undefined;
+                    };
+                    
+                    const filename = getVal("save_as_profile");
+                    if (!filename || filename.trim() === "") {
+                        alert("Please enter a filename in 'save_as_profile'.");
+                        return;
+                    }
+
+                    // Gather Loras
+                    const loras = [];
+                    let i = 1;
+                    while (true) {
+                        const name = getVal(`lora_${i}`);
+                        if (!name || name === "None") break;
+                        loras.push({
+                            name: name,
+                            strength_model: parseFloat(getVal(`l${i}_strength_model`) || 1.0),
+                            strength_clip: parseFloat(getVal(`l${i}_strength_clip`) || 1.0)
+                        });
+                        i++;
+                    }
+
+                    const profileData = {
+                        checkpoint: getVal("checkpoint"),
+                        loras: loras,
+                        character: getVal("character"),
+                        H: getVal("H"),
+                        expression: getVal("expression"),
+                        pose: getVal("pose"),
+                        scene: getVal("scene"),
+                        note: getVal("note"),
+                        output_name: getVal("output_name"),
+                        clip_skip: parseInt(getVal("clip_skip") || 0)
+                    };
+
+                    fetch("/misaka/save_profile", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ filename: filename, data: profileData })
+                    }).then(r => {
+                        if (r.ok) {
+                            alert("Profile saved successfully!");
+                            refreshFileList();
+                        } else {
+                            r.text().then(t => alert("Error saving: " + t));
+                        }
+                    });
+                };
+
+                const updateFilters = () => {
+                    if (!allFiles.length) return;
+
+                    // Filter 1: Top Folders
+                    const topFolders = new Set();
+                    allFiles.forEach(f => {
+                        const parts = f.split("/");
+                        if (parts.length > 1) topFolders.add(parts[0]);
+                    });
+                    
+                    const f1 = self.widgets.find(w => w.name === "Folder Filter 1");
+                    const currentF1 = f1.value;
+                    f1.options.values = ["None", ...Array.from(topFolders).sort()];
+                    if (!f1.options.values.includes(currentF1)) f1.value = "None";
+
+                    // Filter 2: Sub Folders
+                    const f2 = self.widgets.find(w => w.name === "Folder Filter 2");
+                    const selectedF1 = f1.value;
+                    const subFolders = new Set();
+                    
+                    if (selectedF1 !== "None") {
+                        allFiles.forEach(f => {
+                            if (f.startsWith(selectedF1 + "/")) {
+                                const rel = f.substring(selectedF1.length + 1);
+                                const parts = rel.split("/");
+                                if (parts.length > 1) subFolders.add(parts[0]);
+                            }
+                        });
+                    }
+                    
+                    const currentF2 = f2.value;
+                    f2.options.values = ["None", ...Array.from(subFolders).sort()];
+                    if (!f2.options.values.includes(currentF2)) f2.value = "None";
+                    
+                    updateSelector();
+                };
+
+                const updateSelector = () => {
+                    const f1 = self.widgets.find(w => w.name === "Folder Filter 1").value;
+                    const f2 = self.widgets.find(w => w.name === "Folder Filter 2").value;
+                    const selector = self.widgets.find(w => w.name === "profile_selector");
+                    
+                    let filtered = allFiles;
+                    if (f1 !== "None") {
+                        filtered = filtered.filter(f => f.startsWith(f1 + "/"));
+                        if (f2 !== "None") {
+                             filtered = filtered.filter(f => f.startsWith(f1 + "/" + f2 + "/"));
+                        }
+                    }
+                    
+                    selector.options.values = filtered;
+                    if (!filtered.includes(selector.value)) {
+                        selector.value = filtered.length > 0 ? filtered[0] : "None";
+                    }
+                };
                 
-                // 1. 建立 UI
+                const refreshFileList = () => {
+                    fetch("/misaka/profile_list").then(r => r.json()).then(files => {
+                        allFiles = files;
+                        updateFilters();
+                    });
+                };
+
+                // --- UI Construction ---
+                
+                // 1. Save & Load Buttons
+                const saveBtn = this.addWidget("button", "Save Profile (No Run)", null, saveProfileData);
                 const loadBtn = this.addWidget("button", "Load Profile", null, () => {
                     const selector = self.widgets.find(w => w.name === "profile_selector");
                     if (selector && selector.value) {
@@ -52,24 +172,45 @@ app.registerExtension({
                     }
                 });
                 
-                const selector = this.addWidget("combo", "profile_selector", ["Loading..."], () => {}, { values: [] });
+                // 2. Filters & Selector
+                const filter1 = this.addWidget("combo", "Folder Filter 1", "None", () => { updateFilters(); }, { values: ["None"] });
+                const filter2 = this.addWidget("combo", "Folder Filter 2", "None", () => { updateSelector(); }, { values: ["None"] });
+                const selector = this.addWidget("combo", "profile_selector", "Loading...", () => {}, { values: ["Loading..."] });
                 
-                // 2. 獲取列表
-                fetch("/misaka/profile_list").then(r => r.json()).then(files => {
-                    selector.options.values = files;
-                    if (files.length > 0) selector.value = files[0];
+                // 3. Overwrite Button
+                const overwriteBtn = this.addWidget("button", "Overwrite Filename", null, () => {
+                     const sel = self.widgets.find(w => w.name === "profile_selector");
+                     const saveAs = self.widgets.find(w => w.name === "save_as_profile");
+                     if (sel && saveAs && sel.value && sel.value !== "Loading..." && sel.value !== "None") {
+                         saveAs.value = sel.value;
+                     }
                 });
 
-                // 3. 移動到最上方 (Load Btn, Selector)
-                // widgets array: [checkpoint, character..., loadBtn, selector]
-                // Move last 2 to index 0
-                const wLen = this.widgets.length;
-                const wSelector = this.widgets.pop(); // Selector
-                const wBtn = this.widgets.pop(); // Load Btn
-                this.widgets.unshift(wSelector);
-                this.widgets.unshift(wBtn);
+                // --- Reorder Widgets ---
+                // Pop newly added widgets (Reverse order of creation)
+                this.widgets.pop(); // overwrite
+                this.widgets.pop(); // selector
+                this.widgets.pop(); // filter2
+                this.widgets.pop(); // filter1
+                this.widgets.pop(); // loadBtn
+                this.widgets.pop(); // saveBtn
 
-                // 4. 載入邏輯
+                // Place Top Widgets
+                this.widgets.unshift(selector);
+                this.widgets.unshift(filter2);
+                this.widgets.unshift(filter1);
+                this.widgets.unshift(loadBtn);
+                this.widgets.unshift(saveBtn);
+
+                // Insert Overwrite Button
+                const saveAsIdx = this.widgets.findIndex(w => w.name === "save_as_profile");
+                if (saveAsIdx > -1) {
+                    this.widgets.splice(saveAsIdx, 0, overwriteBtn);
+                }
+
+                refreshFileList();
+
+                // 4. Load Logic
                 const loadProfileData = (node, profileName) => {
                     const currentWidth = node.size[0]; // 鎖定寬度
                     
@@ -77,8 +218,6 @@ app.registerExtension({
                         .then(r => r.json())
                         .then(data => {
                             if (!data) return;
-                            
-                            // ... (中間省略，填值邏輯) ...
                             
                             // A. 填入標準欄位
                             const setVal = (name, val) => {
@@ -89,6 +228,7 @@ app.registerExtension({
                             setVal("checkpoint", data.checkpoint);
                             setVal("clip_skip", data.clip_skip ?? 0); 
                             setVal("output_name", data.output_name);
+                            setVal("note", data.note);
                             
                             if (data.positive && typeof data.positive === "string") {
                                 setVal("character", data.positive);

@@ -37,3 +37,8 @@ output_name: nodeObjs.widgets_values[0][nodeObjs.widgets_values[0].indexof('/'):
 
 
 現在需要找出 `default\misaka-prompt-sets` 裡面所有json 的 note，抓出所有"https://civitai.com"開頭的網址，然後利用 checkModelType.py 判斷model type，可能的值為"pony"和"Illustrious"，而pony的checkpoint會像這樣 "boleromixPony_v210" 有 pony(不分大小寫)字樣，而Illustrious的都是"novaAnimeXL_ilV140"，需要檢查是否符合，只要有一個不符合就列出來: `xxx.json: model type mismatch: expected {expected_type}, got {actual_type}`
+
+
+我在save factory profile 的 json 新增了一個欄位:"note"，這個欄位不需要當錯positive or negative prompt，但是希望能在load profile時把該workflow中title == "note" && type == "CLIPTextEncode" 的節點內部值替換成profile.note
+
+save factory profile 時也要把 note 存進去

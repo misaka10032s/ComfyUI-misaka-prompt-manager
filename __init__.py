@@ -37,6 +37,29 @@ async def load_profile(request):
     except Exception as e:
         return web.Response(status=500, text=str(e))
 
+@PromptServer.instance.routes.post("/misaka/save_profile")
+async def save_profile(request):
+    try:
+        data = await request.json()
+        filename = data.get("filename")
+        profile_data = data.get("data")
+        
+        if not filename or not profile_data:
+            return web.Response(status=400, text="Missing filename or data")
+            
+        base = get_storage_path()
+        save_path = os.path.join(base, filename + ".json")
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        with open(save_path, 'w', encoding='utf-8') as f:
+            json.dump(profile_data, f, indent=4, ensure_ascii=False)
+            
+        return web.Response(status=200, text="Saved successfully")
+    except Exception as e:
+        return web.Response(status=500, text=str(e))
+
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS', 'WEB_DIRECTORY']
 
 WEB_DIRECTORY = "js"
