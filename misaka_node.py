@@ -207,7 +207,6 @@ class MisakaProfileFactory:
                 "l1_strength_clip": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
                 "node_map": ("STRING", {"default": "{}", "multiline": False}),
                 "lora_data": ("STRING", {"default": "[]", "multiline": False}),
-                "note": ("STRING", {"multiline": True, "default": "", "rows": 3}),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
@@ -217,7 +216,7 @@ class MisakaProfileFactory:
     FUNCTION = "execute"
     CATEGORY = "MisakaNodes"
 
-    def execute(self, checkpoint, character, H, expression, pose, scene, output_name, save_as_profile, clip_skip, seed=0, prompt=None, extra_pnginfo=None, node_map=None, lora_data=None, note="", **kwargs):
+    def execute(self, checkpoint, character, H, expression, pose, scene, output_name, save_as_profile, clip_skip, seed=0, prompt=None, extra_pnginfo=None, node_map=None, lora_data=None, **kwargs):
         final_loras = []
         
         # 1. Parse Loras
@@ -251,6 +250,18 @@ class MisakaProfileFactory:
         if save_as_profile and save_as_profile.strip():
             base_path = get_storage_path()
             save_path = os.path.join(base_path, save_as_profile.strip() + ".json")
+            
+            # Extract note from extra_pnginfo
+            note_content = ""
+            if extra_pnginfo and "workflow" in extra_pnginfo:
+                workflow_nodes = extra_pnginfo["workflow"].get("nodes", [])
+                for n in workflow_nodes:
+                    if n.get("type") == "CLIPTextEncode" and n.get("title") == "note":
+                        vals = n.get("widgets_values")
+                        if vals and len(vals) > 0:
+                            note_content = str(vals[0])
+                        break
+
             try:
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 
@@ -265,7 +276,7 @@ class MisakaProfileFactory:
                     "negative": negative_text, 
                     "output_name": output_name, 
                     "clip_skip": clip_skip,
-                    "note": note
+                    "note": note_content
                 }
                 with open(save_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=4, ensure_ascii=False)

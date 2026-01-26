@@ -71,6 +71,14 @@ app.registerExtension({
                         i++;
                     }
 
+                    let noteContent = "";
+                    if (app.graph && app.graph._nodes) {
+                        const noteNode = app.graph._nodes.find(n => n.title === "note" && n.type === "CLIPTextEncode");
+                        if (noteNode && noteNode.widgets && noteNode.widgets.length > 0) {
+                            noteContent = noteNode.widgets[0].value;
+                        }
+                    }
+
                     const profileData = {
                         checkpoint: getVal("checkpoint"),
                         loras: loras,
@@ -79,7 +87,7 @@ app.registerExtension({
                         expression: getVal("expression"),
                         pose: getVal("pose"),
                         scene: getVal("scene"),
-                        note: getVal("note"),
+                        note: noteContent,
                         output_name: getVal("output_name"),
                         clip_skip: parseInt(getVal("clip_skip") || 0)
                     };
@@ -228,7 +236,6 @@ app.registerExtension({
                             setVal("checkpoint", data.checkpoint);
                             setVal("clip_skip", data.clip_skip ?? 0); 
                             setVal("output_name", data.output_name);
-                            setVal("note", data.note);
                             
                             if (data.positive && typeof data.positive === "string") {
                                 setVal("character", data.positive);
@@ -279,6 +286,11 @@ app.registerExtension({
                                     setVal(`l${idx}_strength_model`, loras[i].strength_model);
                                     setVal(`l${idx}_strength_clip`, loras[i].strength_clip);
                                 }
+                            }
+                            
+                            // Ensure next empty slot exists
+                            if (loras.length > 0) {
+                                node.addLoraGroup(loras.length + 1);
                             }
                             
                             // 恢復寬度，重新計算高度
