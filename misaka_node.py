@@ -111,6 +111,9 @@ def process_output_name(name_template, prompt=None, extra_pnginfo=None, node_map
         base_name = os.path.basename(checkpoint_name)
         model_stem = os.path.splitext(base_name)[0]
         name_template = f"{model_stem}/{name_template}"
+
+    # 一律加上 images/ 前綴
+    name_template = f"images/{name_template}"
     
     # 解析 Node Map (Title -> ID)
     node_map = {}
