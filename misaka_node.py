@@ -252,6 +252,12 @@ class MisakaProfileFactory:
 
         if save_as_profile and save_as_profile.strip():
             base_path = get_storage_path()
+            
+            # Prefix base_path with checkpoint stem if not already prefixed
+            if checkpoint and not base_path.strip().startswith("/"):
+                model_stem = os.path.splitext(os.path.basename(checkpoint))[0]
+                base_path = f"{base_path}/{model_stem}"
+
             save_path = os.path.join(base_path, save_as_profile.strip() + ".json")
             
             # Extract note from extra_pnginfo
