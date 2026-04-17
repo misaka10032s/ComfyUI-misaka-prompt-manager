@@ -22,7 +22,7 @@ app.registerExtension({
         };
 
         // 1. MisakaPromptManager 處理邏輯
-        if (nodeData.name === "MisakaPromptManager") {
+        if (nodeData.name === "MisakaImagePromptManager") {
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
@@ -32,7 +32,7 @@ app.registerExtension({
             };
         }
 
-        if (nodeData.name === "MisakaProfileFactory") {
+        if (nodeData.name === "MisakaImageProfileFactory") {
             
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
@@ -499,7 +499,7 @@ app.registerExtension({
             };
         }
         // 3. MisakaPromptBuilder 處理邏輯 (動態 Prompt)
-        if (nodeData.name === "MisakaPromptBuilder") {
+        if (nodeData.name === "MisakaImagePromptBuilder") {
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
@@ -707,7 +707,7 @@ app.registerExtension({
         }
 
         // 共用：序列化邏輯 (兩個節點都需要)
-        if (nodeData.name === "MisakaProfileFactory" || nodeData.name === "MisakaPromptManager") {
+        if (nodeData.name === "MisakaImageProfileFactory" || nodeData.name === "MisakaImagePromptManager") {
              const onSerialize = nodeType.prototype.onSerialize;
              nodeType.prototype.onSerialize = function(o) {
                 if (onSerialize) onSerialize.apply(this, arguments);

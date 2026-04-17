@@ -1,0 +1,58 @@
+# ============================================================
+# ComfyUI-misaka-prompt-manager dependencies
+# ============================================================
+# Image nodes (image_nodes.py) — torch / numpy are bundled with ComfyUI
+
+
+# ============================================================
+# Voice nodes — core audio pipeline (always required)
+# ============================================================
+
+# voice/segmentation.py      → find_cut_points (librosa.effects.split)
+# voice/auto_params.py       → analyze_audio (librosa.feature.rms, librosa.yin)
+# voice/crossfade.py         → (numpy only, bundled)
+# voice_nodes.py             → MisakaVCAudioInfo, MisakaVCAutoParams
+librosa>=0.10.0
+
+# voice/resampler.py         → detect_sr, soundfile.info
+# voice_nodes.py             → MisakaVCConvertBatch (soundfile.write)
+# voice_nodes.py             → MisakaVCAudioInfo (soundfile.info)
+soundfile>=0.12.1
+
+# voice/resampler.py         → resample() — high-quality resampling (no aliasing)
+# voice_nodes.py             → MisakaVCConvertBatch (input/output resampling)
+# voice/realtime_stream.py   → _stream_worker (realtime resampling)
+soxr>=0.3.7
+
+# voice/realtime_stream.py   → sounddevice.Stream (mic/speaker I/O)
+# voice_nodes.py             → MisakaVCRealtimeStart, MisakaVCRealtimeStop
+sounddevice>=0.4.6
+
+# voice/rvc_wrapper.py       → _extract_f0 medfilt (F0 smoothing)
+# scipy is usually bundled with ComfyUI; listed here for completeness
+scipy>=1.11.0
+
+
+# ============================================================
+# Voice nodes — RVC inference (optional, for voice-character conversion)
+# Install these to enable full VC; without them the nodes fall back
+# to librosa PSOLA pitch shift.
+# ============================================================
+
+# voice/rvc_wrapper.py       → _get_f0_raw(method="harvest")
+# voice_nodes.py             → MisakaVCConvertBatch, MisakaVCRealtimeStart
+pyworld>=0.3.4
+
+# voice/rvc_wrapper.py       → _get_f0_raw(method="crepe")
+# voice_nodes.py             → MisakaVCConvertBatch, MisakaVCRealtimeStart
+torchcrepe>=0.0.23
+
+# voice/rvc_wrapper.py       → _apply_index (voice index search)
+# voice_nodes.py             → MisakaVCLoadModel (index_path)
+# Use faiss-gpu if CUDA available, faiss-cpu otherwise
+faiss-cpu>=1.7.4
+
+# voice/rvc_wrapper.py       → _extract_hubert_features (requires hubert_base.pt)
+# voice_nodes.py             → MisakaVCConvertBatch (full RVC inference path)
+# NOTE: fairseq install can be tricky on Windows; pre-built wheel recommended
+# fairseq>=0.12.2
