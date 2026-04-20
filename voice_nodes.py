@@ -372,13 +372,12 @@ class MisakaVCAudioInfo:
 
 import re as _re
 
-_SENTENCE_END_RE = _re.compile(r'[。！？…]+')
+_SENTENCE_END_RE = _re.compile(r'[。！？]+')
 
 
 def _normalize_text(text: str) -> str:
     """Normalize newlines before TTS: paragraph breaks → 。, single newlines → remove."""
-    text = _re.sub(r'\n{2,}', '。', text)   # paragraph break → sentence end
-    text = _re.sub(r'\n', '', text)          # single newline → join
+    text = _re.sub(r'\n', '。', text)
     return text.strip()
 
 
@@ -560,23 +559,39 @@ class MisakaVCPMGenerate:
         prepared_ref = _prepare_reference_wav(ref_path)
 
         chunks = _split_for_tts(text, split_threshold)
-        print(f"[MisakaVCPM] {len(text)} chars → {len(chunks)} chunk(s) | ref={ref_path.name}")
+        n = len(chunks)
+        print(f"[MisakaVCPM] {len(text)} chars → {n} chunk(s) | ref={ref_path.name}")
+        if n > 20:
+            print(f"[MisakaVCPM] WARNING: {n} chunks — this will take a very long time.")
 
+        import soundfile as sf
+        tmp_files = []  # (path, pause_sec)
         try:
-            parts = []
             for i, (chunk_text, pause_sec) in enumerate(chunks):
                 if len(chunks) > 1:
-                    print(f"[MisakaVCPM] Chunk {i+1}/{len(chunks)}: 「{chunk_text[:20]}…」")
+                    print(f"[MisakaVCPM] Chunk {i+1}/{len(chunks)}: 「{chunk_text[:20]}… total: {len(chunk_text)}」")
                 chunk_audio = _vcpm_synth_one(model, model_version, chunk_text, prepared_ref,
                                               prompt_text, inference_timesteps, cfg_value)
-                parts.append(chunk_audio)
-                if pause_sec > 0:
-                    parts.append(np.zeros(int(sr * pause_sec), dtype=np.float32))
+                # Write to temp file immediately to free memory, don't accumulate in RAM
+                fd, tmp_path = tempfile.mkstemp(suffix=f"_vcpm_{i}.wav")
+                os.close(fd)
+                sf.write(tmp_path, chunk_audio, sr)
+                tmp_files.append((tmp_path, pause_sec))
+                del chunk_audio
         finally:
             try:
                 os.unlink(prepared_ref)
             except Exception:
                 pass
+
+        # Concatenate from disk
+        parts = []
+        for tmp_path, pause_sec in tmp_files:
+            chunk_audio, _ = sf.read(tmp_path, dtype="float32")
+            parts.append(chunk_audio)
+            if pause_sec > 0:
+                parts.append(np.zeros(int(sr * pause_sec), dtype=np.float32))
+            os.unlink(tmp_path)
 
         audio = np.concatenate(parts) if len(parts) > 1 else parts[0]
         peak = np.max(np.abs(audio))
