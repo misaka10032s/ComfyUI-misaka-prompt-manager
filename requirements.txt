@@ -56,3 +56,16 @@ faiss-cpu>=1.7.4
 # voice_nodes.py             → MisakaVCConvertBatch (full RVC inference path)
 # NOTE: fairseq install can be tricky on Windows; pre-built wheel recommended
 # fairseq>=0.12.2
+
+
+# ============================================================
+# Voice nodes — VoxCPM TTS (optional, for TTS + voice cloning)
+# ============================================================
+
+# voice_nodes.py             → MisakaVCPMLoadModel, MisakaVCPMGenerate
+# Supports VoxCPM2 (ref WAV only) and VoxCPM1.5 (ref WAV + ref text)
+voxcpm>=0.1.0
+
+# Windows runtime: FFmpeg shared DLLs required by torchcodec (used by VoxCPM)
+# NOT pip-installable — download full_build-shared from https://www.gyan.dev/ffmpeg/builds/
+# and set ffmpeg_dll_dir in MisakaVCPMLoadModel node, or add to system PATH

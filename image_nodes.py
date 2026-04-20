@@ -385,14 +385,133 @@ class MisakaImagePromptBuilder:
         return (final_conditioning, )
 
 
+# ---------------------------------------------------------------------------
+# Scale / Size helpers
+# ---------------------------------------------------------------------------
+
+_SCALE_PRESETS = [
+    # ── SD 1.5 (~512K px) ───────────────────────────────────────────────────
+    "512×512  (1:1)",
+    "512×768  (2:3)",
+    "768×512  (3:2)",
+    "512×640  (4:5)",
+    "640×512  (5:4)",
+    "512×682  (3:4)",
+    "682×512  (4:3)",
+    "576×1024 (9:16)",
+    "1024×576 (16:9)",
+    # ── SDXL / Pony (~1M px) ────────────────────────────────────────────────
+    "1024×1024 (1:1  XL)",
+    "832×1216  (2:3  XL)",
+    "1216×832  (3:2  XL)",
+    "896×1152  (7:9  XL)",
+    "1152×896  (9:7  XL)",
+    "768×1344  (4:7  XL)",
+    "1344×768  (7:4  XL)",
+    "640×1536  (5:12 XL)",
+    "1536×640  (12:5 XL)",
+]
+
+_ASPECT_RATIOS = [
+    "free",
+    "1:1",
+    "2:3",
+    "3:2",
+    "3:4",
+    "4:3",
+    "9:16",
+    "16:9",
+    "4:5",
+    "5:4",
+    "7:9",
+    "9:7",
+    "2:1",
+    "1:2",
+]
+
+
+def _round8(v: float) -> int:
+    return max(8, round(v / 8) * 8)
+
+
+def _parse_preset(s: str):
+    m = re.search(r"(\d+)[×x](\d+)", s)
+    return int(m.group(1)), int(m.group(2))
+
+
+class MisakaScalePreset:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "preset": (_SCALE_PRESETS, {"default": _SCALE_PRESETS[1]}),
+                "scale": ("FLOAT", {"default": 1.5, "min": 1.0, "max": 8.0, "step": 0.25}),
+            },
+        }
+
+    RETURN_TYPES = ("INT", "INT", "INT", "INT", "STRING")
+    RETURN_NAMES = ("width", "height", "scaled_width", "scaled_height", "info")
+    FUNCTION = "execute"
+    CATEGORY = "MisakaNodes"
+
+    def execute(self, preset, scale):
+        w, h = _parse_preset(preset)
+        sw, sh = _round8(w * scale), _round8(h * scale)
+        info = f"{w}×{h}  →  {sw}×{sh}  ({scale:.2f}×)"
+        return (w, h, sw, sh, info)
+
+
+class MisakaScaleCustom:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "aspect_ratio": (_ASPECT_RATIOS, {"default": "2:3"}),
+                "width": ("INT", {"default": 512, "min": 0, "max": 8192, "step": 8}),
+                "height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8}),
+                "scale": ("FLOAT", {"default": 1.5, "min": 1.0, "max": 8.0, "step": 0.25}),
+            },
+        }
+
+    RETURN_TYPES = ("INT", "INT", "INT", "INT", "STRING")
+    RETURN_NAMES = ("width", "height", "scaled_width", "scaled_height", "info")
+    FUNCTION = "execute"
+    CATEGORY = "MisakaNodes"
+
+    def execute(self, aspect_ratio, width, height, scale):
+        w, h = width, height
+
+        if aspect_ratio != "free":
+            rw, rh = map(int, aspect_ratio.split(":"))
+            if w > 0 and h == 0:
+                h = _round8(w * rh / rw)
+            elif h > 0 and w == 0:
+                w = _round8(h * rw / rh)
+            # both > 0: JS Calculate already resolved them — use as-is
+
+        if w == 0 or h == 0:
+            raise ValueError(
+                f"[MisakaImageScaleCustom] Cannot compute size: width={w}, height={h}. "
+                "Set at least one dimension > 0, or click Calculate first."
+            )
+
+        sw, sh = _round8(w * scale), _round8(h * scale)
+        info = f"{w}×{h}  →  {sw}×{sh}  ({scale:.2f}×)  [{aspect_ratio}]"
+        return (w, h, sw, sh, info)
+
+
 NODE_CLASS_MAPPINGS = {
     "MisakaImageProfileFactory": MisakaImageProfileFactory,
     "MisakaImagePromptManager": MisakaImagePromptManager,
     "MisakaImagePromptBuilder": MisakaImagePromptBuilder,
+    "MisakaScalePreset": MisakaScalePreset,
+    "MisakaScaleCustom": MisakaScaleCustom,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MisakaImageProfileFactory": "Misaka Image Profile Factory (Editor/Saver)",
     "MisakaImagePromptManager": "Misaka Image Prompt Manager (Loader)",
     "MisakaImagePromptBuilder": "Misaka Image Prompt Builder (Multi-Concat)",
+    "MisakaScalePreset": "Misaka Scale Preset",
+    "MisakaScaleCustom": "Misaka Scale Custom",
 }

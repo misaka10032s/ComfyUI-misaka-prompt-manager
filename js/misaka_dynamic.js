@@ -706,6 +706,86 @@ app.registerExtension({
             };
         }
 
+        // MisakaImageScaleCustom — Calculate button
+        if (nodeData.name === "MisakaScaleCustom") {
+            const onNodeCreated = nodeType.prototype.onNodeCreated;
+            nodeType.prototype.onNodeCreated = function () {
+                const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+                const self = this;
+
+                this.addWidget("button", "Calculate", null, () => {
+                    const ratioWidget = self.widgets.find(w => w.name === "aspect_ratio");
+                    const wWidget    = self.widgets.find(w => w.name === "width");
+                    const hWidget    = self.widgets.find(w => w.name === "height");
+                    if (!ratioWidget || !wWidget || !hWidget) return;
+
+                    const ratio = ratioWidget.value;
+                    if (ratio === "free") return;
+
+                    const [rw, rh] = ratio.split(":").map(Number);
+                    const W = parseInt(wWidget.value) || 0;
+                    const H = parseInt(hWidget.value) || 0;
+
+                    const snap8 = v => Math.max(8, Math.round(v / 8) * 8);
+
+                    if (W > 0 && H === 0) {
+                        hWidget.value = snap8(W * rh / rw);
+                    } else if (H > 0 && W === 0) {
+                        wWidget.value = snap8(H * rw / rh);
+                    } else if (W > 0 && H > 0) {
+                        // width 優先，重算 height
+                        hWidget.value = snap8(W * rh / rw);
+                    }
+
+                    app.graph.setDirtyCanvas(true, true);
+                });
+
+                return r;
+            };
+        }
+
+        // Audio file picker helper
+        const _addAudioFilePicker = (node, widgetName) => {
+            const pathWidget = node.widgets?.find(w => w.name === widgetName);
+            if (!pathWidget) return;
+            node.addWidget("button", "choose file to upload", null, () => {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.accept = ".wav,.mp3,.flac,.ogg,.m4a,.aac";
+                input.onchange = async () => {
+                    const file = input.files[0];
+                    if (!file) return;
+                    const body = new FormData();
+                    body.append("image", file);
+                    body.append("type", "input");
+                    body.append("overwrite", "true");
+                    const resp = await fetch("/upload/image", { method: "POST", body });
+                    if (resp.ok) {
+                        pathWidget.value = (await resp.json()).name;
+                        app.graph.setDirtyCanvas(true, true);
+                    }
+                };
+                input.click();
+            });
+        };
+
+        const _AUDIO_PATH_NODES = {
+            "MisakaVCConvertBatch": "audio_path",
+            "MisakaVCAudioInfo":    "audio_path",
+            "MisakaVCAutoParams":   "audio_path",
+            "MisakaVCPMGenerate":   "reference_audio",
+        };
+
+        if (_AUDIO_PATH_NODES[nodeData.name]) {
+            const widgetName = _AUDIO_PATH_NODES[nodeData.name];
+            const onNodeCreated = nodeType.prototype.onNodeCreated;
+            nodeType.prototype.onNodeCreated = function () {
+                const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+                _addAudioFilePicker(this, widgetName);
+                return r;
+            };
+        }
+
         // 共用：序列化邏輯 (兩個節點都需要)
         if (nodeData.name === "MisakaImageProfileFactory" || nodeData.name === "MisakaImagePromptManager") {
              const onSerialize = nodeType.prototype.onSerialize;
