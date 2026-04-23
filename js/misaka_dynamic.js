@@ -744,14 +744,14 @@ app.registerExtension({
             };
         }
 
-        // Audio file picker helper
-        const _addAudioFilePicker = (node, widgetName) => {
+        // Generic file picker helper
+        const _addFilePicker = (node, widgetName, accept) => {
             const pathWidget = node.widgets?.find(w => w.name === widgetName);
             if (!pathWidget) return;
             node.addWidget("button", "choose file to upload", null, () => {
                 const input = document.createElement("input");
                 input.type = "file";
-                input.accept = ".wav,.mp3,.flac,.ogg,.m4a,.aac";
+                input.accept = accept;
                 input.onchange = async () => {
                     const file = input.files[0];
                     if (!file) return;
@@ -769,19 +769,29 @@ app.registerExtension({
             });
         };
 
-        const _AUDIO_PATH_NODES = {
+        const _AUDIO_NODES = {
             "MisakaVCConvertBatch": "audio_path",
             "MisakaVCAudioInfo":    "audio_path",
             "MisakaVCAutoParams":   "audio_path",
             "MisakaVCPMGenerate":   "reference_audio",
         };
 
-        if (_AUDIO_PATH_NODES[nodeData.name]) {
-            const widgetName = _AUDIO_PATH_NODES[nodeData.name];
+        if (_AUDIO_NODES[nodeData.name]) {
+            const widgetName = _AUDIO_NODES[nodeData.name];
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
-                _addAudioFilePicker(this, widgetName);
+                _addFilePicker(this, widgetName, ".wav,.mp3,.flac,.ogg,.m4a,.aac");
+                return r;
+            };
+        }
+
+        if (nodeData.name === "MisakaVCLoadModel") {
+            const onNodeCreated = nodeType.prototype.onNodeCreated;
+            nodeType.prototype.onNodeCreated = function () {
+                const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+                _addFilePicker(this, "model_path", ".pth");
+                _addFilePicker(this, "index_path", ".index");
                 return r;
             };
         }

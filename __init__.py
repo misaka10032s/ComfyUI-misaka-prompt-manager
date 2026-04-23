@@ -7,11 +7,10 @@ import sys
 # Optional RVC packages (pyworld, torchcrepe, faiss) are listed in
 # requirements.txt but NOT auto-installed — they may need native build tools.
 _AUTO_INSTALL = [
-    ("librosa",      "librosa>=0.10.0"),       # segmentation, auto_params
-    ("soundfile",    "soundfile>=0.12.1"),      # resampler, batch convert, audio info
-    ("soxr",         "soxr>=0.3.7"),            # resampler (HQ, no aliasing)
-    ("sounddevice",  "sounddevice>=0.4.6"),     # realtime stream
-    ("scipy",        "scipy>=1.11.0"),          # rvc_wrapper F0 medfilt
+    ("librosa",   "librosa>=0.10.0"),      # segmentation, auto_params
+    ("soundfile", "soundfile>=0.12.1"),    # resampler, batch convert, audio info
+    ("soxr",      "soxr>=0.3.7"),          # resampler (HQ, no aliasing)
+    ("scipy",     "scipy>=1.11.0"),        # rvc_wrapper F0 medfilt
 ]
 
 def _ensure_packages():

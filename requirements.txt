@@ -35,27 +35,17 @@ scipy>=1.11.0
 
 # ============================================================
 # Voice nodes — RVC inference (optional, for voice-character conversion)
-# Install these to enable full VC; without them the nodes fall back
-# to librosa PSOLA pitch shift.
+# rvc-python metadata pins numpy<=1.23.5 but the code itself is numpy 2.x compatible.
+# Install with --no-deps to bypass that constraint:
+#   python_embeded\python.exe -m pip install rvc-python --no-deps
 # ============================================================
 
-# voice/rvc_wrapper.py       → _get_f0_raw(method="harvest")
-# voice_nodes.py             → MisakaVCConvertBatch, MisakaVCRealtimeStart
+# voice/rvc_wrapper.py       → RVCInference (full voice conversion pipeline)
+# voice_nodes.py             → MisakaVCLoadModel, MisakaVCConvertBatch
+praat-parselmouth>=0.4.3
 pyworld>=0.3.4
-
-# voice/rvc_wrapper.py       → _get_f0_raw(method="crepe")
-# voice_nodes.py             → MisakaVCConvertBatch, MisakaVCRealtimeStart
 torchcrepe>=0.0.23
-
-# voice/rvc_wrapper.py       → _apply_index (voice index search)
-# voice_nodes.py             → MisakaVCLoadModel (index_path)
-# Use faiss-gpu if CUDA available, faiss-cpu otherwise
-faiss-cpu>=1.7.4
-
-# voice/rvc_wrapper.py       → _extract_hubert_features (requires hubert_base.pt)
-# voice_nodes.py             → MisakaVCConvertBatch (full RVC inference path)
-# NOTE: fairseq install can be tricky on Windows; pre-built wheel recommended
-# fairseq>=0.12.2
+faiss-cpu
 
 
 # ============================================================
