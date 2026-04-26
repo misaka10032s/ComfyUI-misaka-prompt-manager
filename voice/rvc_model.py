@@ -168,6 +168,11 @@ class ResidualCouplingBlock(nn.Module):
                 x = flow(x, x_mask, g=g, reverse=True)
         return x
 
+    def remove_weight_norm(self):
+        for f in self.flows:
+            if hasattr(f, "enc"):
+                f.enc.remove_weight_norm()
+
 
 # ---------------------------------------------------------------------------
 # Transformer encoder
@@ -526,7 +531,7 @@ class GeneratorNSF(nn.Module):
             for k, d in zip(resblock_kernel_sizes, resblock_dilation_sizes):
                 self.resblocks.append(ResBlock1(ch_now, k, d))
 
-        self.conv_post = weight_norm(Conv1d(ch, 1, 7, 1, padding=3))
+        self.conv_post = weight_norm(Conv1d(ch, 1, 7, 1, padding=3, bias=False))
         self.ups.apply(self._init_weights)
 
         if gin_channels != 0:
@@ -595,16 +600,20 @@ class SynthesizerTrnMs256NSFsid(nn.Module):
                                           wn_layers=flow_wn_layers)
         self.emb_g = nn.Embedding(spk_embed_dim, gin_channels)
 
+    def remove_weight_norm(self):
+        self.dec.remove_weight_norm()
+        self.flow.remove_weight_norm()
+
     def infer(self, phone, phone_lengths, pitch, nsff0, sid, max_len=None):
         g = self.emb_g(sid).unsqueeze(-1)
         m_p, logs_p, x_mask = self.enc_p(phone, pitch, phone_lengths)
-        z_p = (m_p + torch.exp(logs_p) * torch.randn_like(m_p) * 0.66666) * x_mask
+        z_p = (m_p + torch.exp(logs_p) * torch.randn_like(m_p) * 0.33) * x_mask
         z = self.flow(z_p, x_mask, g=g, reverse=True)
         o = self.dec((z * x_mask)[:, :, :max_len], nsff0[:, :max_len], g=g)
         return o, x_mask
 
 
-class SynthesizerTrnMs768NSFsid(nn.Module):
+class SynthesizerTrnMs768NSFsid(nn.Module):  # v2
     def __init__(self, spec_channels, segment_size, inter_channels, hidden_channels,
                  filter_channels, n_heads, n_layers, kernel_size, p_dropout,
                  resblock, resblock_kernel_sizes, resblock_dilation_sizes,
@@ -625,10 +634,14 @@ class SynthesizerTrnMs768NSFsid(nn.Module):
                                           wn_layers=flow_wn_layers)
         self.emb_g = nn.Embedding(spk_embed_dim, gin_channels)
 
+    def remove_weight_norm(self):
+        self.dec.remove_weight_norm()
+        self.flow.remove_weight_norm()
+
     def infer(self, phone, phone_lengths, pitch, nsff0, sid, max_len=None):
         g = self.emb_g(sid).unsqueeze(-1)
         m_p, logs_p, x_mask = self.enc_p(phone, pitch, phone_lengths)
-        z_p = (m_p + torch.exp(logs_p) * torch.randn_like(m_p) * 0.66666) * x_mask
+        z_p = (m_p + torch.exp(logs_p) * torch.randn_like(m_p) * 0.33) * x_mask
         z = self.flow(z_p, x_mask, g=g, reverse=True)
         o = self.dec((z * x_mask)[:, :, :max_len], nsff0[:, :max_len], g=g)
         return o, x_mask

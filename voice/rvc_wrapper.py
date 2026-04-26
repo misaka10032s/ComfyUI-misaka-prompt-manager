@@ -120,59 +120,93 @@ def _install_rvc_finder():
 # HuBERT feature extraction (replaces fairseq)
 # ---------------------------------------------------------------------------
 
-_FEATURE_DIM_CACHE: dict = {}   # cache model_id → output hidden_size
 
 def _load_hubert(device: str, version: str):
     """
-    v1 models (256-dim emb_phone): use ContentVec — lengyue233/content-vec-best
-    v2 models (768-dim emb_phone): use HuBERT base — facebook/hubert-base-ls960
-    Returns (processor, model, layer, expected_dim)
+    Both v1 and v2 RVC models were trained against ContentVec — NOT plain HuBERT.
+    Using facebook/hubert-base-ls960 here produces features in the right shape
+    but the wrong distribution, which is heard as correct-timbre-but-broken-content.
+
+    - v1 (256-dim emb_phone): ContentVec last_hidden_state → final_proj (768→256)
+    - v2 (768-dim emb_phone): ContentVec last_hidden_state (768)
+
+    Source model: lengyue233/content-vec-best — a HF port of ContentVec with
+    the classifier_proj weights included, used unchanged by Ultimate RVC.
     """
     cache_key = (device, version)
     if cache_key in _HUBERT_CACHE:
         return _HUBERT_CACHE[cache_key]
     try:
-        from transformers import HubertModel, Wav2Vec2FeatureExtractor
+        from transformers import HubertModel
+        import torch.nn as _nn
     except ImportError:
         raise RuntimeError(
             "[MisakaVC] 'transformers' not installed.\n"
             "  Fix: python_embeded\\python.exe -m pip install transformers"
         )
+
+    class HubertModelWithFinalProj(HubertModel):
+        def __init__(self, cfg):
+            super().__init__(cfg)
+            self.final_proj = _nn.Linear(cfg.hidden_size, cfg.classifier_proj_size)
+
+    model_id = "lengyue233/content-vec-best"
+    print(f"[MisakaVC] Loading ContentVec ({model_id}) for {version}…")
     if version == "v1":
-        model_id = "lengyue233/content-vec-best"
-        layer = 9
+        try:
+            model = HubertModelWithFinalProj.from_pretrained(model_id)
+        except Exception as e:
+            print(f"[MisakaVC] final_proj load failed ({e}); using plain HubertModel — "
+                  "v1 models may produce mangled audio.")
+            model = HubertModel.from_pretrained(model_id)
     else:
-        model_id = "facebook/hubert-base-ls960"
-        layer = 12
-    print(f"[MisakaVC] Loading feature extractor ({model_id})…")
-    processor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
-    model = HubertModel.from_pretrained(model_id).eval().to(device)
-    hidden_size = model.config.hidden_size
-    print(f"[MisakaVC] Feature extractor ready (hidden_size={hidden_size}, layer={layer}).")
-    _HUBERT_CACHE[cache_key] = (processor, model, layer, hidden_size)
-    return processor, model, layer, hidden_size
+        model = HubertModel.from_pretrained(model_id)
+    model = model.eval().to(device)
+    print(f"[MisakaVC] ContentVec ready (hidden_size={model.config.hidden_size}).")
+    _HUBERT_CACHE[cache_key] = model
+    return model
 
 
 def _extract_features(audio_16k: np.ndarray, device: str, version: str) -> torch.Tensor:
-    """Returns (1, T*2, C) — C matches what the loaded feature extractor outputs."""
-    processor, hubert, layer, _ = _load_hubert(device, version)
-    inputs = processor(audio_16k, sampling_rate=16000, return_tensors="pt", padding=True)
-    wav = inputs["input_values"].to(device)
+    """
+    Returns (1, T, C) at 50 fps — caller upsamples 2× before feeding the generator.
+
+    Exactly matches Ultimate RVC's inference path:
+        feats = model(wav)["last_hidden_state"]
+        if v1: feats = model.final_proj(feats[0]).unsqueeze(0)
+    """
+    hubert = _load_hubert(device, version)
+    wav = torch.from_numpy(audio_16k).float().view(1, -1).to(device)
     with torch.no_grad():
-        out = hubert(wav, output_hidden_states=True)
-        feats = out.hidden_states[layer]   # (1, T, hidden_size)
-    # RVC convention: upsample T×2
-    feats = F.interpolate(feats.transpose(1, 2), scale_factor=2,
-                          mode="nearest").transpose(1, 2)
+        feats = hubert(wav).last_hidden_state    # (1, T_50fps, hidden_size=768)
+        if version == "v1" and hasattr(hubert, "final_proj"):
+            feats = hubert.final_proj(feats[0]).unsqueeze(0)  # (1, T, 256)
     return feats
+
+
+def _upsample2x(feats: torch.Tensor) -> torch.Tensor:
+    """Upsample (1, T, C) → (1, 2T, C) with nearest interpolation (RVC convention)."""
+    return F.interpolate(feats.transpose(1, 2), scale_factor=2,
+                         mode="nearest").transpose(1, 2)
 
 
 # ---------------------------------------------------------------------------
 # F0 extraction via pyworld
 # ---------------------------------------------------------------------------
 
-def _extract_f0(audio: np.ndarray, sr: int, f0_up_key: int,
+_F0_MIN = 50.0
+_F0_MAX = 1100.0
+_F0_MEL_MIN = 1127 * np.log(1 + _F0_MIN / 700)
+_F0_MEL_MAX = 1127 * np.log(1 + _F0_MAX / 700)
+
+# High-pass filter matching Ultimate RVC (48 Hz, 5th order Butterworth at 16 kHz)
+from scipy import signal as _signal
+_BH, _AH = _signal.butter(5, 48, btype="high", fs=16000)
+
+
+def _extract_f0(audio_16k: np.ndarray, p_len: int, f0_up_key: int,
                 filter_radius: int) -> tuple:
+    """Extract F0 from 16 kHz audio, matching Ultimate RVC's approach."""
     try:
         import pyworld as pw
     except ImportError:
@@ -180,42 +214,50 @@ def _extract_f0(audio: np.ndarray, sr: int, f0_up_key: int,
             "[MisakaVC] 'pyworld' not installed.\n"
             "  Fix: python_embeded\\python.exe -m pip install pyworld"
         )
-    f0_min, f0_max = 50.0, 1100.0
-    f0, _ = pw.harvest(audio.astype(np.float64), sr,
-                       f0_floor=f0_min, f0_ceil=f0_max, frame_period=10.0)
+    f0, _ = pw.harvest(audio_16k.astype(np.float64), 16000,
+                       f0_floor=_F0_MIN, f0_ceil=_F0_MAX, frame_period=10.0)
     if filter_radius > 2:
         from scipy.signal import medfilt
         k = filter_radius if filter_radius % 2 == 1 else filter_radius + 1
         f0 = medfilt(f0, k)
+    f0 = f0[:p_len]
     if f0_up_key != 0:
-        f0 = np.clip(f0 * (2 ** (f0_up_key / 12.0)), f0_min, f0_max)
+        f0 *= 2 ** (f0_up_key / 12.0)
+        f0 = np.clip(f0, _F0_MIN, _F0_MAX)
 
     f0_bak = f0.copy()
-    mel_min = 1127 * np.log(1 + f0_min / 700)
-    mel_max = 1127 * np.log(1 + f0_max / 700)
-    mel = 1127 * np.log(1 + f0 / 700)
-    mel[mel > 0] = (mel[mel > 0] - mel_min) * 254 / (mel_max - mel_min) + 1
-    f0_coarse = np.clip(np.round(mel), 1, 255).astype(np.int32)
+    f0_mel = 1127 * np.log(1 + f0 / 700)
+    f0_mel[f0_mel > 0] = (f0_mel[f0_mel > 0] - _F0_MEL_MIN) * 254 / (
+        _F0_MEL_MAX - _F0_MEL_MIN) + 1
+    f0_mel[f0_mel <= 1] = 1
+    f0_mel[f0_mel > 255] = 255
+    f0_coarse = np.rint(f0_mel).astype(np.int32)
     return f0_coarse, f0_bak
 
 
 # ---------------------------------------------------------------------------
-# Optional FAISS index refinement
+# Volume-envelope matching (Ultimate RVC AudioProcessor.change_rms)
 # ---------------------------------------------------------------------------
 
-def _apply_index(feats: np.ndarray, index, index_rate: float) -> np.ndarray:
-    if index is None or index_rate == 0:
-        return feats
-    try:
-        import faiss  # noqa
-        score, ix = index.search(feats.astype(np.float32), k=8)
-        weight = np.square(1.0 / (score + 1e-6))
-        weight /= weight.sum(axis=1, keepdims=True)
-        vecs = np.stack([index.reconstruct(int(r)) for r in ix.ravel()])
-        vecs = vecs.reshape(*ix.shape, feats.shape[-1])
-        return feats * (1 - index_rate) + (vecs * weight[..., np.newaxis]).sum(1) * index_rate
-    except Exception:
-        return feats
+def _change_rms(src: np.ndarray, src_sr: int, tgt: np.ndarray, tgt_sr: int,
+                rate: float) -> np.ndarray:
+    """
+    Blend target audio's RMS envelope toward source audio's RMS envelope.
+    rate=1.0 → keep target as-is; rate=0.0 → fully match source.
+    """
+    import librosa
+    rms_src = librosa.feature.rms(y=src, frame_length=src_sr // 2 * 2,
+                                  hop_length=src_sr // 2)
+    rms_tgt = librosa.feature.rms(y=tgt, frame_length=tgt_sr // 2 * 2,
+                                  hop_length=tgt_sr // 2)
+    rms_src_t = F.interpolate(torch.from_numpy(rms_src).float().unsqueeze(0),
+                              size=tgt.shape[0], mode="linear").squeeze()
+    rms_tgt_t = F.interpolate(torch.from_numpy(rms_tgt).float().unsqueeze(0),
+                              size=tgt.shape[0], mode="linear").squeeze()
+    rms_tgt_t = torch.maximum(rms_tgt_t, torch.zeros_like(rms_tgt_t) + 1e-6)
+    scale = (torch.pow(rms_src_t, 1.0 - rate)
+             * torch.pow(rms_tgt_t, rate - 1.0)).numpy()
+    return (tgt * scale).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -252,9 +294,36 @@ def _build_and_load(cfg, version, weights):
             f"[MisakaVC] Cannot build model from config {cfg}: {e}"
         ) from e
 
+    # Some checkpoints are partially de-normed: most layers have weight_g/weight_v
+    # but a few (e.g. conv_pre, conv_post) only have plain weight.
+    # For those, decompose plain weight → (weight_g, weight_v) so the model's
+    # weight_norm structure can absorb them correctly.
+    model_keys = set(net_g.state_dict().keys())
+    patched = {}
+    decomposed = []
+    for key, val in clean.items():
+        g_key = key[:-7] + ".weight_g"   # only valid when key ends with ".weight"
+        v_key = key[:-7] + ".weight_v"
+        if (key.endswith(".weight")
+                and g_key not in clean          # checkpoint doesn't have weight_g
+                and g_key in model_keys):       # but our model does (weight_norm layer)
+            # Decompose: weight_v = weight, weight_g = per-filter L2 norm
+            norm_dims = list(range(1, val.ndim))
+            g = val.norm(dim=norm_dims, keepdim=True)
+            patched[g_key] = g
+            patched[v_key] = val
+            decomposed.append(key)
+        else:
+            patched[key] = val
+    if decomposed:
+        print(f"[MisakaVC] Decomposed {len(decomposed)} plain weight(s) → weight_norm: {decomposed}")
+    clean = patched
+
     missing, unexpected = net_g.load_state_dict(clean, strict=False)
     if missing:
-        print(f"[MisakaVC] Missing weight keys (first 5): {missing[:5]}")
+        print(f"[MisakaVC] Missing weight keys ({len(missing)} total, first 5): {missing[:5]}")
+    if unexpected:
+        print(f"[MisakaVC] Unexpected weight keys ({len(unexpected)} total, first 5): {unexpected[:5]}")
     return net_g
 
 
@@ -363,55 +432,189 @@ class RVCConverter:
                 "  Expected a dict with 'weight'/'config' keys or a full model object."
             )
 
-        self._net_g = net_g.eval().to(self.device)
+        # Force float32 — checkpoint may carry float16 tensors after load_state_dict
+        self._net_g = net_g.float().eval().to(self.device)
         print(f"[MisakaVC] Loaded: {Path(self.model_path).name} "
               f"(version={self._version}, sr={self._out_sr}, f0={self._use_f0})")
 
+        self._big_npy = None
         if self.index_path and Path(self.index_path).is_file():
             try:
                 import faiss
                 self._index = faiss.read_index(self.index_path)
-                print(f"[MisakaVC] Index: {Path(self.index_path).name}")
+                self._big_npy = self._index.reconstruct_n(0, self._index.ntotal)
+                print(f"[MisakaVC] Index: {Path(self.index_path).name} "
+                      f"({self._index.ntotal} vectors)")
             except Exception as e:
                 print(f"[MisakaVC] Index load failed: {e}")
 
+    # ── Per-chunk voice conversion (mirrors Ultimate RVC `voice_conversion`) ──
+    def _vc_chunk(self, audio0: np.ndarray, pitch, pitchf, sid,
+                  index_rate: float, protect: float) -> np.ndarray:
+        """
+        audio0: 1-D float32 16 kHz chunk (padded on both sides with t_pad)
+        pitch / pitchf: sliced frame-rate tensors aligned to this chunk, or None
+        Returns 1-D float32 output at self._out_sr.
+        """
+        with torch.no_grad():
+            # HuBERT features at 50 fps
+            feats = _extract_features(audio0, self.device, self._version)
+            feats0 = feats.clone() if pitch is not None else None
+
+            # FAISS blend at 50 fps (Ultimate RVC applies index here, not after 2x)
+            if (self._index is not None and self._big_npy is not None
+                    and index_rate > 0):
+                npy = feats[0].cpu().numpy()
+                try:
+                    score, ix = self._index.search(npy.astype(np.float32), k=8)
+                    weight = np.square(1.0 / np.maximum(score, 1e-8))
+                    weight /= weight.sum(axis=1, keepdims=True)
+                    blended = np.sum(self._big_npy[ix] *
+                                     np.expand_dims(weight, axis=2), axis=1)
+                    feats = (torch.from_numpy(blended).unsqueeze(0).to(
+                                 self.device, dtype=feats.dtype) * index_rate
+                             + feats * (1.0 - index_rate))
+                except Exception as e:
+                    print(f"[MisakaVC] FAISS search failed, skipping index: {e}")
+
+            # 2x upsample 50 → 100 fps
+            feats = _upsample2x(feats)
+            p_len = min(audio0.shape[0] // 160, feats.shape[1])
+
+            if pitch is not None:
+                feats0 = _upsample2x(feats0)
+                pitch  = pitch[:, :p_len]
+                pitchf = pitchf[:, :p_len]
+                feats  = feats[:, :p_len, :]
+                feats0 = feats0[:, :p_len, :]
+                if protect < 0.5:
+                    pitchff = pitchf.clone()
+                    pitchff[pitchf > 0] = 1.0
+                    pitchff[pitchf < 1] = protect
+                    feats = feats * pitchff.unsqueeze(-1) + feats0 * (
+                        1.0 - pitchff.unsqueeze(-1))
+                    feats = feats.to(feats0.dtype)
+            else:
+                feats = feats[:, :p_len, :]
+
+            p_len_t = torch.tensor([p_len], device=self.device).long()
+            audio_out, _ = self._net_g.infer(
+                feats.float(), p_len_t,
+                pitch, pitchf.float() if pitchf is not None else None, sid)
+        result = audio_out[0, 0].data.cpu().float().numpy()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return result
+
     def convert(self, audio: np.ndarray, src_sr: int,
                 f0_method: str = "harvest", f0_up_key: int = 0,
-                index_rate: float = 0.6, protect: float = 0.33,
-                filter_radius: int = 3) -> tuple:
+                index_rate: float = 0.5, protect: float = 0.33,
+                rms_mix_rate: float = 0.25) -> tuple:
+        """
+        Mirror of Ultimate RVC's Pipeline.pipeline() — the important bits:
+          • HP filter on ALL audio (not just F0)
+          • 1-second reflection pad (x_pad=1)
+          • silent-point chunking for audio > ~41 s (x_max=41)
+          • F0 extracted once on the whole padded clip; HuBERT features re-extracted
+            per chunk with overlap, stripped at the output sample rate.
+        """
         import soxr
 
-        audio_16k = soxr.resample(audio.astype(np.float32), src_sr, 16000)
-        audio_model = soxr.resample(audio.astype(np.float32), src_sr, self._out_sr)
+        # Ultimate RVC default config (x_pad=1, x_query=6, x_center=38, x_max=41)
+        sample_rate = 16000
+        window = 160
+        x_pad, x_query, x_center, x_max = 1, 6, 38, 41
+        t_pad       = sample_rate * x_pad          # 16000
+        t_pad_tgt   = self._out_sr * x_pad
+        t_pad2      = t_pad * 2
+        t_query     = sample_rate * x_query        # 96000
+        t_center    = sample_rate * x_center       # 608000
+        t_max       = sample_rate * x_max          # 656000
 
-        feats = _extract_features(audio_16k, self.device, self._version)
-        feats_np = _apply_index(feats.squeeze(0).cpu().float().numpy(),
-                                self._index, index_rate)
-        feats = torch.from_numpy(feats_np).unsqueeze(0).to(self.device)
-        T = feats.shape[1]
+        # ── 1. Resample to 16 kHz ──────────────────────────────────────────
+        audio = soxr.resample(audio.astype(np.float32), src_sr, sample_rate)
 
-        if self._use_f0:
-            f0_coarse, f0_bak = _extract_f0(audio_model, self._out_sr,
-                                              f0_up_key, filter_radius)
-        else:
-            f0_coarse = np.zeros(T, dtype=np.int32)
-            f0_bak = np.zeros(T, dtype=np.float32)
+        # ── 2. Peak normalise (matches Ultimate RVC's load_audio_infer) ───
+        audio_max_abs = float(np.abs(audio).max()) / 0.95
+        if audio_max_abs > 1.0:
+            audio = audio / audio_max_abs
 
-        if f0_coarse.shape[0] < T:
-            f0_coarse = np.pad(f0_coarse, (0, T - f0_coarse.shape[0]))
-            f0_bak = np.pad(f0_bak, (0, T - f0_bak.shape[0]))
-        else:
-            f0_coarse, f0_bak = f0_coarse[:T], f0_bak[:T]
+        # ── 3. HP filter applied to ALL downstream processing ─────────────
+        audio = _signal.filtfilt(_BH, _AH, audio).astype(np.float32)
 
-        pitch = torch.from_numpy(f0_coarse).unsqueeze(0).long().to(self.device)
-        pitchf = torch.from_numpy(f0_bak.astype(np.float32)).unsqueeze(0).to(self.device)
-        phone_len = torch.LongTensor([T]).to(self.device)
+        # ── 4. Find silent split points if audio > t_max ──────────────────
+        opt_ts = []
+        audio_sp = np.pad(audio, (window // 2, window // 2), mode="reflect")
+        if audio_sp.shape[0] > t_max:
+            audio_sum = np.zeros_like(audio)
+            for i in range(window):
+                audio_sum = audio_sum + audio_sp[i : i - window]
+            for t in range(t_center, audio.shape[0], t_center):
+                seg = np.abs(audio_sum[t - t_query : t + t_query])
+                if len(seg) == 0:
+                    continue
+                opt_ts.append(t - t_query + int(np.argmin(seg)))
+            print(f"[MisakaVC] long audio ({audio.shape[0]/sample_rate:.1f}s) → "
+                  f"{len(opt_ts)} split point(s)")
+
+        # ── 5. Big reflection pad for actual processing ───────────────────
+        audio_pad = np.pad(audio, (t_pad, t_pad), mode="reflect")
+        p_len = audio_pad.shape[0] // window
         sid = torch.LongTensor([0]).to(self.device)
 
-        with torch.no_grad():
-            audio_out, _ = self._net_g.infer(feats, phone_len, pitch, pitchf, sid)
+        # ── 6. F0 once on the whole padded clip ───────────────────────────
+        if self._use_f0:
+            f0_coarse, f0_bak = _extract_f0(audio_pad, p_len, f0_up_key,
+                                            filter_radius=3)
+            f0_coarse = f0_coarse[:p_len]
+            f0_bak    = f0_bak[:p_len]
+            pitch  = torch.from_numpy(f0_coarse).unsqueeze(0).long().to(self.device)
+            pitchf = torch.from_numpy(f0_bak.astype(np.float32)
+                                      ).unsqueeze(0).to(self.device)
+            print(f"[MisakaVC] p_len={p_len}, "
+                  f"f0_voiced={float((f0_bak>0).mean()):.1%}")
+        else:
+            pitch = pitchf = None
 
-        result = audio_out[0, 0].cpu().float().numpy()
+        # ── 7. Per-chunk conversion with t_pad_tgt overlap trim ───────────
+        audio_opt = []
+        s = 0
+        t = None
+        for t in opt_ts:
+            t = (t // window) * window
+            chunk = audio_pad[s : t + t_pad2 + window]
+            cp = pitch[:, s // window : (t + t_pad2) // window] if pitch is not None else None
+            cpf = pitchf[:, s // window : (t + t_pad2) // window] if pitchf is not None else None
+            out = self._vc_chunk(chunk, cp, cpf, sid, index_rate, protect)
+            audio_opt.append(out[t_pad_tgt : -t_pad_tgt])
+            s = t
+
+        # final chunk (everything after last split, or the whole clip if no splits)
+        final_chunk = audio_pad[t:] if t is not None else audio_pad
+        cp = (pitch[:, t // window:] if (pitch is not None and t is not None)
+              else pitch)
+        cpf = (pitchf[:, t // window:] if (pitchf is not None and t is not None)
+               else pitchf)
+        out = self._vc_chunk(final_chunk, cp, cpf, sid, index_rate, protect)
+        audio_opt.append(out[t_pad_tgt : -t_pad_tgt])
+
+        result = np.concatenate(audio_opt).astype(np.float32)
+
+        # ── 8. Volume envelope (Ultimate RVC's change_rms) ────────────────
+        #   rate=1  → keep converted RMS (no change)
+        #   rate=0  → fully match source RMS
+        if rms_mix_rate < 1.0 - 1e-4:
+            result = _change_rms(audio, sample_rate, result,
+                                 self._out_sr, rms_mix_rate)
+
+        # ── 9. Peak normalise output ──────────────────────────────────────
+        audio_max_out = float(np.abs(result).max()) / 0.99
+        if audio_max_out > 1.0:
+            result = result / audio_max_out
+
+        print(f"[MisakaVC] output samples={len(result)} "
+              f"({len(result)/self._out_sr:.2f}s @ {self._out_sr} Hz), "
+              f"rms={float(np.sqrt((result**2).mean())):.4f}")
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         return result, self._out_sr

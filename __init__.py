@@ -118,6 +118,34 @@ async def save_profile(request):
         return web.Response(status=500, text=str(e))
 
 
+def _scan_files(ext: str) -> list:
+    """Recursively find files with given extension in common RVC model locations."""
+    import folder_paths
+    results = []
+    search_dirs = [
+        os.path.join(folder_paths.models_dir, "rvc"),
+        os.path.join(folder_paths.models_dir, "RVC"),
+        folder_paths.input_directory,
+    ]
+    for d in search_dirs:
+        if os.path.isdir(d):
+            for root, dirs, files in os.walk(d):
+                for f in files:
+                    if f.lower().endswith(ext):
+                        results.append(os.path.join(root, f).replace("\\", "/"))
+    return sorted(results)
+
+
+@PromptServer.instance.routes.get("/misaka/rvc_model_list")
+async def get_rvc_model_list(request):
+    return web.json_response(_scan_files(".pth"))
+
+
+@PromptServer.instance.routes.get("/misaka/rvc_index_list")
+async def get_rvc_index_list(request):
+    return web.json_response(_scan_files(".index"))
+
+
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
 WEB_DIRECTORY = "js"

@@ -262,20 +262,17 @@ class MisakaVCConvertBatch:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "vc_model": ("VC_MODEL",),
+                "vc_model":   ("VC_MODEL",),
                 "audio_path": ("STRING", {"default": ""}),
             },
             "optional": {
-                "vc_params": ("VC_PARAMS",),
-                "output_path": ("STRING", {"default": ""}),
-                "f0_up_key": ("INT", {"default": 0, "min": -12, "max": 12}),
-                "index_rate": ("FLOAT", {"default": 0.6, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "protect": ("FLOAT", {"default": 0.33, "min": 0.0, "max": 0.5, "step": 0.01}),
-                "filter_radius": ("INT", {"default": 3, "min": 0, "max": 7}),
-                "min_silence_ms": ("INT", {"default": 300, "min": 100, "max": 2000}),
-                "overlap_ms": ("INT", {"default": 150, "min": 50, "max": 500}),
-                "fade_ms": ("INT", {"default": 100, "min": 10, "max": 300}),
-                "max_segment_sec": ("FLOAT", {"default": 15.0, "min": 3.0, "max": 60.0}),
+                "vc_params":     ("VC_PARAMS",),
+                "output_path":   ("STRING", {"default": ""}),
+                "f0_up_key":     ("INT",   {"default": 0,    "min": -24,  "max": 24}),
+                # Ultimate RVC defaults: index_rate=0.5, protect=0.33, volume_envelope=0.25
+                "index_rate":    ("FLOAT", {"default": 0.5,  "min": 0.0,  "max": 1.0,  "step": 0.01}),
+                "protect":       ("FLOAT", {"default": 0.33, "min": 0.0,  "max": 0.5,  "step": 0.01}),
+                "rms_mix_rate":  ("FLOAT", {"default": 0.25, "min": 0.0,  "max": 1.0,  "step": 0.01}),
             },
         }
 
@@ -291,19 +288,14 @@ class MisakaVCConvertBatch:
         vc_params=None,
         output_path="",
         f0_up_key=0,
-        index_rate=0.6,
+        index_rate=0.5,
         protect=0.33,
-        filter_radius=3,
-        min_silence_ms=300,
-        overlap_ms=150,
-        fade_ms=100,
-        max_segment_sec=15.0,
+        rms_mix_rate=0.25,
     ):
         import soundfile as sf
         import numpy as np
-        from voice.segmentation import find_cut_points
-        from voice.crossfade import concat_with_crossfade
-        from voice.resampler import detect_sr, resample, choose_model_sr
+        import soxr
+        from voice.resampler import detect_sr
 
         p = _resolve_audio_path(audio_path)
         if not p.is_file():
@@ -311,10 +303,10 @@ class MisakaVCConvertBatch:
         audio_path_str = str(p)
 
         if vc_params:
-            f0_up_key = vc_params.get("f0_up_key", f0_up_key)
-            index_rate = vc_params.get("index_rate", index_rate)
-            protect = vc_params.get("protect", protect)
-            filter_radius = vc_params.get("filter_radius", filter_radius)
+            f0_up_key    = vc_params.get("f0_up_key",    f0_up_key)
+            index_rate   = vc_params.get("index_rate",   index_rate)
+            protect      = vc_params.get("protect",      protect)
+            rms_mix_rate = vc_params.get("rms_mix_rate", rms_mix_rate)
 
         f0_method = getattr(vc_model, "_default_f0_method", "harvest")
 
@@ -323,52 +315,32 @@ class MisakaVCConvertBatch:
         if audio.ndim > 1:
             audio = audio.mean(axis=1)
 
-        model_sr = choose_model_sr(src_sr)
-        if src_sr != model_sr:
-            audio = resample(audio, src_sr, model_sr)
-
-        cut_points = find_cut_points(
-            audio, model_sr,
-            min_silence_ms=min_silence_ms,
-            max_segment_sec=max_segment_sec,
-            overlap_ms=overlap_ms,
+        out_audio, out_sr = vc_model.convert(
+            audio, src_sr,
+            f0_method=f0_method,
+            f0_up_key=f0_up_key,
+            index_rate=index_rate,
+            protect=protect,
+            rms_mix_rate=rms_mix_rate,
         )
-
-        converted_segments = []
-        for cp in cut_points:
-            segment = audio[cp["padded_start"]: cp["padded_end"]]
-            out_audio, out_sr = vc_model.convert(
-                segment, model_sr,
-                f0_method=f0_method,
-                f0_up_key=f0_up_key,
-                index_rate=index_rate,
-                protect=protect,
-                filter_radius=filter_radius,
-            )
-            if out_sr != model_sr:
-                out_audio = resample(out_audio, out_sr, model_sr)
-            converted_segments.append(out_audio)
-
-        final_audio = concat_with_crossfade(converted_segments, cut_points, model_sr, fade_ms=fade_ms)
 
         saved_note = ""
         _out = str(output_path).strip() if output_path else ""
         if _out and Path(_out).suffix.lower() in (".wav", ".flac", ".ogg", ".mp3"):
             Path(_out).parent.mkdir(parents=True, exist_ok=True)
-            sf.write(_out, final_audio, model_sr)
+            sf.write(_out, out_audio, out_sr)
             saved_note = f"\n輸出: {_out}"
 
         report = (
             f"完成\n"
             f"輸入: {audio_path_str}"
             f"{saved_note}\n"
-            f"採樣率: {model_sr} Hz\n"
-            f"分段數: {len(cut_points)}\n"
-            f"輸出時長: {len(final_audio) / model_sr:.2f}s\n"
+            f"採樣率: {out_sr} Hz\n"
+            f"輸出時長: {len(out_audio) / out_sr:.2f}s\n"
             f"f0_method: {f0_method}  f0_up_key: {f0_up_key}\n"
-            f"index_rate: {index_rate}  protect: {protect}"
+            f"index_rate: {index_rate}  protect: {protect}  rms_mix: {rms_mix_rate}"
         )
-        return (_numpy_to_audio(final_audio, model_sr), report)
+        return (_numpy_to_audio(out_audio, out_sr), report)
 
 
 # ---------------------------------------------------------------------------

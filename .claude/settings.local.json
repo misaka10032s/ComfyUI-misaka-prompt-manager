@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:github.com)",
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(gh api *)",
+      "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('voice/rvc_wrapper.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('rvc_wrapper.py: OK'\\)\")",
+      "Bash(python -c \"import ast, pathlib; ast.parse\\(pathlib.Path\\('voice_nodes.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('voice_nodes.py: OK'\\)\")"
     ]
   }
 }
