@@ -606,6 +606,25 @@ class MisakaLoopCkpt:
         return (model, clip, vae, ckpt_stem, run_info)
 
 
+def _resolve_prompt_templates(text: str, prompt: dict) -> str:
+    """Replace %NodeTitle.field% tokens by looking up values in the prompt graph."""
+    if not prompt or "%" not in text:
+        return text
+    def _replace(m):
+        title, field = m.group(1), m.group(2)
+        for node in prompt.values():
+            if not isinstance(node, dict):
+                continue
+            node_title = node.get("_meta", {}).get("title", "")
+            if node_title == title:
+                val = node.get("inputs", {}).get(field)
+                # skip if it's a connection reference (list) or missing
+                if val is not None and not isinstance(val, list):
+                    return str(val)
+        return m.group(0)  # not found — keep raw text
+    return re.sub(r"%([^%.]+)\.([^%]+)%", _replace, text)
+
+
 class MisakaLoopPrompt:
     @classmethod
     def INPUT_TYPES(s):
@@ -617,6 +636,9 @@ class MisakaLoopPrompt:
             "optional": {
                 "ckpt_name": ("STRING", {"forceInput": True}),
                 "prompt_1":  ("MISAKA_PROMPT",),
+            },
+            "hidden": {
+                "prompt": "PROMPT",
             },
         }
 
@@ -633,7 +655,7 @@ class MisakaLoopPrompt:
     def VALIDATE_INPUTS(cls, **kwargs):
         return True
 
-    def execute(self, clip, base_folder, **kwargs):
+    def execute(self, clip, base_folder, prompt=None, **kwargs):
         prompts = []
         i = 1
         while True:
@@ -657,8 +679,8 @@ class MisakaLoopPrompt:
         cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
 
         ckpt_name      = kwargs.get("ckpt_name", "output") or "output"
-        base           = base_folder.strip().rstrip("/")
-        formatted_name = f"{base}/{alias}/{ckpt_name}"
+        resolved_base  = _resolve_prompt_templates(base_folder.strip().rstrip("/"), prompt or {})
+        formatted_name = f"{resolved_base}/{alias}/{ckpt_name}"
 
         return ([[cond, {"pooled_output": pooled}]], formatted_name)
 
