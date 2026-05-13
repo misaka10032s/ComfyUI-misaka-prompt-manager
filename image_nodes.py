@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import threading
 import torch
 import folder_paths
 import comfy.sd
@@ -500,18 +501,188 @@ class MisakaScaleCustom:
         return (w, h, sw, sh, info)
 
 
+class MisakaPromptText:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "alias": ("STRING", {"default": "alias", "multiline": False}),
+                "text":  ("STRING", {"default": "", "multiline": True, "rows": 6}),
+            }
+        }
+
+    RETURN_TYPES = ("MISAKA_PROMPT",)
+    RETURN_NAMES = ("prompt",)
+    FUNCTION = "execute"
+    CATEGORY = "MisakaNodes/Image"
+
+    def execute(self, alias, text):
+        return ((alias.strip(), text.strip()),)
+
+
+class MisakaCkptName:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"ckpt_name": (folder_paths.get_filename_list("checkpoints"),)}}
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("ckpt_name",)
+    FUNCTION = "execute"
+    CATEGORY = "MisakaNodes/Image"
+
+    def execute(self, ckpt_name):
+        return (ckpt_name,)
+
+
+class _LoopState:
+    run_index   = 0
+    current_run = 0
+    n_prompts   = 1
+    lock        = threading.Lock()
+
+
+class MisakaLoopCkpt:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "reset_on_run": ("BOOLEAN", {"default": False, "label_on": "Reset ON", "label_off": "Reset OFF"}),
+            },
+            "optional": {"ckpt_name_1": ("STRING", {"forceInput": True})},
+        }
+
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE", "STRING", "STRING")
+    RETURN_NAMES = ("MODEL", "CLIP", "VAE", "ckpt_name", "run_info")
+    FUNCTION = "execute"
+    CATEGORY = "MisakaNodes/Image"
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, **kwargs):
+        return True
+
+    def execute(self, reset_on_run=False, **kwargs):
+        names = []
+        i = 1
+        while True:
+            v = kwargs.get(f"ckpt_name_{i}")
+            if v is None:
+                break
+            if isinstance(v, str) and v.strip():
+                names.append(v.strip())
+            i += 1
+
+        if not names:
+            raise ValueError("[MisakaLoopCkpt] No checkpoint names connected")
+
+        N = len(names)
+        with _LoopState.lock:
+            if reset_on_run:
+                _LoopState.run_index = 0
+            n_prompts = max(_LoopState.n_prompts, 1)
+            total     = N * n_prompts
+            run       = _LoopState.run_index % total
+            _LoopState.current_run = run
+            _LoopState.run_index   = (run + 1) % total
+            ckpt_idx   = (run // n_prompts) % N
+            prompt_idx = (run % n_prompts) + 1
+
+        name = names[ckpt_idx]
+        ckpt_path = folder_paths.get_full_path("checkpoints", name)
+        if not ckpt_path:
+            raise ValueError(f"[MisakaLoopCkpt] Checkpoint '{name}' not found")
+
+        out = comfy.sd.load_checkpoint_guess_config(
+            ckpt_path, output_vae=True, output_clip=True,
+            embedding_directory=folder_paths.get_folder_paths("embeddings")
+        )
+        model, clip, vae = out[:3]
+        ckpt_stem = os.path.splitext(os.path.basename(name))[0]
+        run_info  = f"run {run+1}/{total} | ckpt {ckpt_idx+1}/{N}: {ckpt_stem} | prompt {prompt_idx}/{n_prompts}"
+        print(f"[MisakaLoop] {run_info}")
+        return (model, clip, vae, ckpt_stem, run_info)
+
+
+class MisakaLoopPrompt:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "clip":        ("CLIP",),
+                "base_folder": ("STRING", {"default": "images/test", "multiline": False}),
+            },
+            "optional": {
+                "ckpt_name": ("STRING", {"forceInput": True}),
+                "prompt_1":  ("MISAKA_PROMPT",),
+            },
+        }
+
+    RETURN_TYPES = ("CONDITIONING", "STRING")
+    RETURN_NAMES = ("CONDITIONING", "formatted_name")
+    FUNCTION = "execute"
+    CATEGORY = "MisakaNodes/Image"
+
+    @classmethod
+    def IS_CHANGED(cls, clip, base_folder, **kwargs):
+        return float("nan")
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, **kwargs):
+        return True
+
+    def execute(self, clip, base_folder, **kwargs):
+        prompts = []
+        i = 1
+        while True:
+            v = kwargs.get(f"prompt_{i}")
+            if v is None:
+                break
+            if isinstance(v, tuple) and len(v) == 2:
+                prompts.append(v)
+            i += 1
+
+        if not prompts:
+            raise ValueError("[MisakaLoopPrompt] No prompt inputs connected")
+
+        M = len(prompts)
+        with _LoopState.lock:
+            _LoopState.n_prompts = M
+            idx = _LoopState.current_run % M
+
+        alias, text = prompts[idx]
+        tokens = clip.tokenize(text)
+        cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
+
+        ckpt_name      = kwargs.get("ckpt_name", "output") or "output"
+        base           = base_folder.strip().rstrip("/")
+        formatted_name = f"{base}/{alias}/{ckpt_name}"
+
+        return ([[cond, {"pooled_output": pooled}]], formatted_name)
+
+
 NODE_CLASS_MAPPINGS = {
     "MisakaImageProfileFactory": MisakaImageProfileFactory,
-    "MisakaImagePromptManager": MisakaImagePromptManager,
-    "MisakaImagePromptBuilder": MisakaImagePromptBuilder,
-    "MisakaScalePreset": MisakaScalePreset,
-    "MisakaScaleCustom": MisakaScaleCustom,
+    "MisakaImagePromptManager":  MisakaImagePromptManager,
+    "MisakaImagePromptBuilder":  MisakaImagePromptBuilder,
+    "MisakaScalePreset":         MisakaScalePreset,
+    "MisakaScaleCustom":         MisakaScaleCustom,
+    "MisakaPromptText":          MisakaPromptText,
+    "MisakaCkptName":            MisakaCkptName,
+    "MisakaLoopPrompt":          MisakaLoopPrompt,
+    "MisakaLoopCkpt":            MisakaLoopCkpt,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MisakaImageProfileFactory": "Misaka Image Profile Factory (Editor/Saver)",
-    "MisakaImagePromptManager": "Misaka Image Prompt Manager (Loader)",
-    "MisakaImagePromptBuilder": "Misaka Image Prompt Builder (Multi-Concat)",
-    "MisakaScalePreset": "Misaka Scale Preset",
-    "MisakaScaleCustom": "Misaka Scale Custom",
+    "MisakaImagePromptManager":  "Misaka Image Prompt Manager (Loader)",
+    "MisakaImagePromptBuilder":  "Misaka Image Prompt Builder (Multi-Concat)",
+    "MisakaScalePreset":         "Misaka Scale Preset",
+    "MisakaScaleCustom":         "Misaka Scale Custom",
+    "MisakaPromptText":          "Misaka Prompt Text",
+    "MisakaCkptName":            "Misaka Ckpt Name",
+    "MisakaLoopPrompt":          "Misaka Loop Prompt",
+    "MisakaLoopCkpt":            "Misaka Loop Ckpt",
 }
