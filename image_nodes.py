@@ -521,6 +521,7 @@ class MisakaPromptText:
 
 
 class MisakaCkptName:
+    """UI-only helper: exposes a checkpoint dropdown and passes the selected name as a STRING wire."""
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {"ckpt_name": (folder_paths.get_filename_list("checkpoints"),)}}
@@ -535,10 +536,24 @@ class MisakaCkptName:
 
 
 class _LoopState:
-    run_index   = 0
-    current_run = 0
-    n_prompts   = 1
-    lock        = threading.Lock()
+    """
+    Module-level singleton shared by MisakaLoopCkpt and MisakaLoopPrompt.
+
+    LIMITATION: only one LoopCkpt+LoopPrompt pair per workflow is supported.
+    Placing two separate pairs in the same graph will cause them to share this
+    state and interfere with each other's counters.
+    """
+    run_index        = 0
+    current_run      = 0
+    n_prompts        = 1
+    # written by LoopCkpt, read by LoopPrompt
+    n_ckpts          = 1
+    ckpt_idx         = 0
+    ckpt_stem        = "output"
+    ckpt_ran         = False   # True while LoopPrompt hasn't yet consumed this run's ckpt info
+    # independent counter for solo LoopPrompt (no LoopCkpt in the workflow)
+    prompt_solo_index = 0
+    lock             = threading.Lock()
 
 
 class MisakaLoopCkpt:
@@ -546,13 +561,23 @@ class MisakaLoopCkpt:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "reset_on_run": ("BOOLEAN", {"default": False, "label_on": "Reset ON", "label_off": "Reset OFF"}),
+                "reset_counter": ("BOOLEAN", {
+                    "default": False,
+                    "label_on": "Reset (next run restarts from run 1)",
+                    "label_off": "Continue",
+                }),
             },
-            "optional": {"ckpt_name_1": ("STRING", {"forceInput": True})},
+            "optional": {
+                "ckpt_name_1": ("STRING", {"forceInput": True}),
+                "base_folder":  ("STRING", {"default": "images/test", "multiline": False}),
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+            },
         }
 
     RETURN_TYPES = ("MODEL", "CLIP", "VAE", "STRING", "STRING")
-    RETURN_NAMES = ("MODEL", "CLIP", "VAE", "ckpt_name", "run_info")
+    RETURN_NAMES = ("MODEL", "CLIP", "VAE", "formatted_name", "run_info")
     FUNCTION = "execute"
     CATEGORY = "MisakaNodes/Image"
 
@@ -564,31 +589,33 @@ class MisakaLoopCkpt:
     def VALIDATE_INPUTS(cls, **kwargs):
         return True
 
-    def execute(self, reset_on_run=False, **kwargs):
-        names = []
-        i = 1
-        while True:
-            v = kwargs.get(f"ckpt_name_{i}")
-            if v is None:
-                break
-            if isinstance(v, str) and v.strip():
-                names.append(v.strip())
-            i += 1
+    def execute(self, reset_counter=False, base_folder="images/test", prompt=None, **kwargs):
+        # Collect all ckpt_name_N inputs, skipping gaps (disconnected optional ports are absent)
+        entries = []
+        for key, val in kwargs.items():
+            m = re.fullmatch(r"ckpt_name_(\d+)", key)
+            if m and isinstance(val, str) and val.strip():
+                entries.append((int(m.group(1)), val.strip()))
+        names = [v for _, v in sorted(entries)]
 
         if not names:
             raise ValueError("[MisakaLoopCkpt] No checkpoint names connected")
 
         N = len(names)
         with _LoopState.lock:
-            if reset_on_run:
+            # reset only when counter is not already at 0 — avoids freezing at run 1
+            if reset_counter and _LoopState.run_index != 0:
                 _LoopState.run_index = 0
             n_prompts = max(_LoopState.n_prompts, 1)
             total     = N * n_prompts
             run       = _LoopState.run_index % total
             _LoopState.current_run = run
             _LoopState.run_index   = (run + 1) % total
-            ckpt_idx   = (run // n_prompts) % N
-            prompt_idx = (run % n_prompts) + 1
+            ckpt_idx  = (run // n_prompts) % N
+            # share ckpt info for LoopPrompt
+            _LoopState.n_ckpts   = N
+            _LoopState.ckpt_idx  = ckpt_idx
+            _LoopState.ckpt_ran  = True
 
         name = names[ckpt_idx]
         ckpt_path = folder_paths.get_full_path("checkpoints", name)
@@ -601,9 +628,15 @@ class MisakaLoopCkpt:
         )
         model, clip, vae = out[:3]
         ckpt_stem = os.path.splitext(os.path.basename(name))[0]
-        run_info  = f"run {run+1}/{total} | ckpt {ckpt_idx+1}/{N}: {ckpt_stem} | prompt {prompt_idx}/{n_prompts}"
-        print(f"[MisakaLoop] {run_info}")
-        return (model, clip, vae, ckpt_stem, run_info)
+
+        with _LoopState.lock:
+            _LoopState.ckpt_stem = ckpt_stem
+
+        resolved_base  = _resolve_prompt_templates(base_folder.strip().rstrip("/"), prompt or {})
+        formatted_name = f"{resolved_base}/{ckpt_stem}"
+        run_info       = f"ckpt {ckpt_idx + 1}/{N}: {ckpt_stem}"
+        print(f"[MisakaLoopCkpt] {run_info}  (run {run + 1}/{total})")
+        return (model, clip, vae, formatted_name, run_info)
 
 
 def _resolve_prompt_templates(text: str, prompt: dict) -> str:
@@ -634,16 +667,15 @@ class MisakaLoopPrompt:
                 "base_folder": ("STRING", {"default": "images/test", "multiline": False}),
             },
             "optional": {
-                "ckpt_name": ("STRING", {"forceInput": True}),
-                "prompt_1":  ("MISAKA_PROMPT",),
+                "prompt_1": ("MISAKA_PROMPT",),
             },
             "hidden": {
                 "prompt": "PROMPT",
             },
         }
 
-    RETURN_TYPES = ("CONDITIONING", "STRING")
-    RETURN_NAMES = ("CONDITIONING", "formatted_name")
+    RETURN_TYPES = ("CONDITIONING", "STRING", "STRING")
+    RETURN_NAMES = ("CONDITIONING", "formatted_name", "run_info")
     FUNCTION = "execute"
     CATEGORY = "MisakaNodes/Image"
 
@@ -656,15 +688,13 @@ class MisakaLoopPrompt:
         return True
 
     def execute(self, clip, base_folder, prompt=None, **kwargs):
-        prompts = []
-        i = 1
-        while True:
-            v = kwargs.get(f"prompt_{i}")
-            if v is None:
-                break
-            if isinstance(v, tuple) and len(v) == 2:
-                prompts.append(v)
-            i += 1
+        # Collect all prompt_N inputs, skipping gaps
+        entries = []
+        for key, val in kwargs.items():
+            m = re.fullmatch(r"prompt_(\d+)", key)
+            if m and isinstance(val, tuple) and len(val) == 2:
+                entries.append((int(m.group(1)), val))
+        prompts = [v for _, v in sorted(entries)]
 
         if not prompts:
             raise ValueError("[MisakaLoopPrompt] No prompt inputs connected")
@@ -672,17 +702,45 @@ class MisakaLoopPrompt:
         M = len(prompts)
         with _LoopState.lock:
             _LoopState.n_prompts = M
-            idx = _LoopState.current_run % M
+            coordinated = _LoopState.ckpt_ran
+            if coordinated:
+                # paired with LoopCkpt: use current_run to stay in sync
+                idx      = _LoopState.current_run % M
+                n_ckpts  = _LoopState.n_ckpts
+                ckpt_idx = _LoopState.ckpt_idx
+                ckpt_stem = _LoopState.ckpt_stem
+                total    = n_ckpts * M
+                run      = _LoopState.current_run
+                _LoopState.ckpt_ran = False   # consumed
+            else:
+                # solo mode: advance own counter
+                idx       = _LoopState.prompt_solo_index % M
+                _LoopState.prompt_solo_index = (idx + 1) % M
+                n_ckpts   = 0
+                ckpt_idx  = 0
+                ckpt_stem = _LoopState.ckpt_stem  # may be default "output"
+                total     = M
+                run       = idx
 
         alias, text = prompts[idx]
         tokens = clip.tokenize(text)
         cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
 
-        ckpt_name      = kwargs.get("ckpt_name", "output") or "output"
-        resolved_base  = _resolve_prompt_templates(base_folder.strip().rstrip("/"), prompt or {})
-        formatted_name = f"{resolved_base}/{alias}/{ckpt_name}"
+        resolved_base = _resolve_prompt_templates(base_folder.strip().rstrip("/"), prompt or {})
 
-        return ([[cond, {"pooled_output": pooled}]], formatted_name)
+        if coordinated:
+            formatted_name = f"{resolved_base}/{ckpt_stem}/{alias}"
+            run_info = (
+                f"run {run + 1}/{total} | "
+                f"ckpt {ckpt_idx + 1}/{n_ckpts}: {ckpt_stem} | "
+                f"prompt {idx + 1}/{M}: {alias}"
+            )
+        else:
+            formatted_name = f"{resolved_base}/{alias}"
+            run_info = f"prompt {idx + 1}/{M}: {alias}"
+
+        print(f"[MisakaLoopPrompt] {run_info}")
+        return ([[cond, {"pooled_output": pooled}]], formatted_name, run_info)
 
 
 NODE_CLASS_MAPPINGS = {
