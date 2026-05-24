@@ -52,19 +52,43 @@ class MisakaLoopCkptCore:
 
         N = len(names)
         with _LoopState.lock:
-            # reset only when counter is not already at 0 — avoids freezing at run 1
             if reset_counter and _LoopState.run_index != 0:
                 _LoopState.run_index = 0
-            n_prompts = max(_LoopState.n_prompts, 1)
-            total     = N * n_prompts
+
+            # Promote pending dim_sizes (registered by PromptCore in the previous run).
+            # This ensures stale entries from removed PromptCore nodes don't linger.
+            if _LoopState.dim_sizes_next:
+                _LoopState.dim_sizes = dict(_LoopState.dim_sizes_next)
+                _LoopState.dim_sizes_next = {}
+
+            # Compute total runs across all registered prompt dimensions.
+            # On the very first run dim_sizes is empty → dim_product defaults to 1.
+            dim_sizes = dict(_LoopState.dim_sizes)
+            dim_product = 1
+            for size in dim_sizes.values():
+                dim_product *= max(size, 1)
+
+            total     = N * dim_product
             run       = _LoopState.run_index % total
             _LoopState.current_run = run
             _LoopState.run_index   = (run + 1) % total
-            ckpt_idx  = (run // n_prompts) % N
-            # share ckpt info for LoopPromptCore
-            _LoopState.n_ckpts   = N
-            _LoopState.ckpt_idx  = ckpt_idx
-            _LoopState.ckpt_ran  = True
+
+            # Ckpt is the outermost (slowest) dimension
+            ckpt_idx  = (run // dim_product) % N
+
+            # Compute per-prompt-dimension indices (odometer: dim1 slowest, dimN fastest)
+            sorted_dims = sorted(dim_sizes.keys())
+            remaining   = run % dim_product
+            dim_indices = {}
+            for dim in reversed(sorted_dims):
+                size = max(dim_sizes[dim], 1)
+                dim_indices[dim] = remaining % size
+                remaining //= size
+
+            _LoopState.n_ckpts    = N
+            _LoopState.ckpt_idx   = ckpt_idx
+            _LoopState.ckpt_ran   = True
+            _LoopState.dim_indices = dim_indices
 
         name = names[ckpt_idx]
         ckpt_path = folder_paths.get_full_path("checkpoints", name)
@@ -83,6 +107,6 @@ class MisakaLoopCkptCore:
 
         resolved_base  = _resolve_prompt_templates(base_folder.strip().rstrip("/"), prompt or {})
         formatted_name = f"{resolved_base}/{ckpt_stem}"
-        run_info       = f"ckpt {ckpt_idx + 1}/{N}: {ckpt_stem}"
-        print(f"[MisakaLoopCkptCore] {run_info}  (run {run + 1}/{total})")
+        run_info       = f"ckpt {ckpt_idx + 1}/{N}  run {run + 1}/{total}"
+        print(f"[MisakaLoopCkptCore] {run_info}")
         return (model, clip, vae, formatted_name, run_info)

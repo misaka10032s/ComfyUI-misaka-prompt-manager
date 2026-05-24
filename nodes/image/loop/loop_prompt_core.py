@@ -9,6 +9,7 @@ class MisakaLoopPromptCore:
             "required": {
                 "clip":        ("CLIP",),
                 "base_folder": ("STRING", {"default": "images/test", "multiline": False}),
+                "dimension":   ("INT",    {"default": 1, "min": 1, "max": 9}),
             },
             "optional": {
                 "prompt_1": ("MISAKA_PROMPT",),
@@ -24,14 +25,14 @@ class MisakaLoopPromptCore:
     CATEGORY = "MisakaNodes/Image"
 
     @classmethod
-    def IS_CHANGED(cls, clip, base_folder, **kwargs):
+    def IS_CHANGED(cls, clip, base_folder, dimension=1, **kwargs):
         return float("nan")
 
     @classmethod
     def VALIDATE_INPUTS(cls, **kwargs):
         return True
 
-    def execute(self, clip, base_folder, prompt=None, **kwargs):
+    def execute(self, clip, base_folder, dimension=1, prompt=None, **kwargs):
         # Collect all prompt_N inputs, skipping gaps
         entries = []
         for key, val in kwargs.items():
@@ -45,21 +46,32 @@ class MisakaLoopPromptCore:
 
         M = len(prompts)
         with _LoopState.lock:
-            _LoopState.n_prompts = M
+            # Register our size for the NEXT CkptCore run (pending/committed swap pattern)
+            _LoopState.dim_sizes_next[dimension] = M
+
             coordinated = _LoopState.ckpt_ran
             if coordinated:
-                # paired with LoopCkptCore: use current_run to stay in sync
-                idx      = _LoopState.current_run % M
-                n_ckpts  = _LoopState.n_ckpts
-                ckpt_idx = _LoopState.ckpt_idx
+                # CkptCore already ran and populated dim_indices.
+                # If our dimension is present, use it; otherwise fall back to
+                # current_run % M (graceful degradation on first queue).
+                if dimension in _LoopState.dim_indices:
+                    idx = _LoopState.dim_indices[dimension]
+                else:
+                    idx = _LoopState.current_run % M
+                n_ckpts   = _LoopState.n_ckpts
+                ckpt_idx  = _LoopState.ckpt_idx
                 ckpt_stem = _LoopState.ckpt_stem
-                total    = n_ckpts * M
-                run      = _LoopState.current_run
-                _LoopState.ckpt_ran = False   # consumed
+                run       = _LoopState.current_run
+                # Compute total from all registered dims + n_ckpts
+                dim_product = 1
+                for size in _LoopState.dim_sizes.values():
+                    dim_product *= max(size, 1)
+                total = n_ckpts * dim_product
             else:
-                # solo mode: advance own counter
-                idx       = _LoopState.prompt_solo_index % M
-                _LoopState.prompt_solo_index = (idx + 1) % M
+                # Solo mode: advance own per-dimension counter
+                prev      = _LoopState.solo_indices.get(dimension, 0)
+                idx       = prev % M
+                _LoopState.solo_indices[dimension] = (idx + 1) % M
                 n_ckpts   = 0
                 ckpt_idx  = 0
                 ckpt_stem = _LoopState.ckpt_stem  # may be default "output"
@@ -77,11 +89,11 @@ class MisakaLoopPromptCore:
             run_info = (
                 f"run {run + 1}/{total} | "
                 f"ckpt {ckpt_idx + 1}/{n_ckpts}: {ckpt_stem} | "
-                f"prompt {idx + 1}/{M}: {alias}"
+                f"dim{dimension} {idx + 1}/{M}: {alias}"
             )
         else:
             formatted_name = f"{resolved_base}/{alias}"
-            run_info = f"prompt {idx + 1}/{M}: {alias}"
+            run_info = f"dim{dimension} {idx + 1}/{M}: {alias}"
 
         print(f"[MisakaLoopPromptCore] {run_info}")
         return ([[cond, {"pooled_output": pooled}]], formatted_name, run_info)
