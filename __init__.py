@@ -31,13 +31,13 @@ def _ensure_packages():
 _ensure_packages()
 # ─────────────────────────────────────────────────────────────────────────────
 
-from .image_nodes import NODE_CLASS_MAPPINGS as _IMAGE_NODES
-from .image_nodes import NODE_DISPLAY_NAME_MAPPINGS as _IMAGE_NAMES
-from .image_nodes import get_storage_path
+from .nodes.image import NODE_CLASS_MAPPINGS as _IMAGE_NODES
+from .nodes.image import NODE_DISPLAY_NAME_MAPPINGS as _IMAGE_NAMES
+from .nodes.image.factory import get_storage_path
 
 try:
-    from .voice_nodes import NODE_CLASS_MAPPINGS as _VOICE_NODES
-    from .voice_nodes import NODE_DISPLAY_NAME_MAPPINGS as _VOICE_NAMES
+    from .nodes.voice import NODE_CLASS_MAPPINGS as _VOICE_NODES
+    from .nodes.voice import NODE_DISPLAY_NAME_MAPPINGS as _VOICE_NAMES
 except Exception as e:
     print(f"[MisakaVC] Could not load voice nodes: {e}")
     _VOICE_NODES = {}

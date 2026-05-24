@@ -1,9 +1,9 @@
 import { app } from "../../scripts/app.js";
 
-console.log("[Misaka] JS Extension Loading...");
+console.log("[Misaka] Image Factory JS Loading...");
 
 app.registerExtension({
-    name: "Misaka.DynamicLoras",
+    name: "Misaka.ImageFactory",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
         // 共用：隱藏輔助欄位函數
         const hideMisakaWidgets = (node) => {
@@ -13,15 +13,14 @@ app.registerExtension({
                 const w = node.widgets.find(x => x.name === name);
                 if (w) {
                     w.type = "hidden";
-                    w.computeSize = () => [0, -4]; // 讓它不佔據高度
-                    w.draw = () => {}; // 禁止繪製
-                    // 嘗試將其移出可視區域 (雖然 draw 已經禁止了)
-                    w.y = 0; 
+                    w.computeSize = () => [0, -4];
+                    w.draw = () => {};
+                    w.y = 0;
                 }
             }
         };
 
-        // 1. MisakaPromptManager 處理邏輯
+        // 1. MisakaImagePromptManager 處理邏輯
         if (nodeData.name === "MisakaImagePromptManager") {
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
@@ -32,6 +31,7 @@ app.registerExtension({
             };
         }
 
+        // 2. MisakaImageProfileFactory 處理邏輯
         if (nodeData.name === "MisakaImageProfileFactory") {
             
             const onNodeCreated = nodeType.prototype.onNodeCreated;
@@ -41,7 +41,7 @@ app.registerExtension({
                 hideMisakaWidgets(this); 
                 
                 const self = this;
-                let allFiles = []; // Cache all files for filtering
+                let allFiles = [];
 
                 // --- Helper Logic ---
 
@@ -57,7 +57,6 @@ app.registerExtension({
                         return;
                     }
 
-                    // Gather Loras
                     const loras = [];
                     let i = 1;
                     while (true) {
@@ -109,7 +108,6 @@ app.registerExtension({
                 const updateFilters = () => {
                     if (!allFiles.length) return;
 
-                    // Filter 1: Top Folders
                     const topFolders = new Set();
                     allFiles.forEach(f => {
                         const parts = f.split("/");
@@ -121,7 +119,6 @@ app.registerExtension({
                     f1.options.values = ["None", ...Array.from(topFolders).sort()];
                     if (!f1.options.values.includes(currentF1)) f1.value = "None";
 
-                    // Filter 2: Sub Folders
                     const f2 = self.widgets.find(w => w.name === "Folder Filter 2");
                     const selectedF1 = f1.value;
                     const subFolders = new Set();
@@ -193,7 +190,6 @@ app.registerExtension({
 
                 // --- UI Construction ---
                 
-                // 1. Save & Load Buttons
                 const saveBtn = this.addWidget("button", "Save Profile (No Run)", null, saveProfileData);
                 const loadBtn = this.addWidget("button", "Load Profile", null, () => {
                     const selector = self.widgets.find(w => w.name === "profile_selector");
@@ -202,16 +198,13 @@ app.registerExtension({
                     }
                 });
                 
-                // 2. Filters & Selector
                 const filter1 = this.addWidget("combo", "Folder Filter 1", "None", () => { updateFilters(); }, { values: ["None"] });
                 const filter2 = this.addWidget("combo", "Folder Filter 2", "None", () => { updateSelector(); }, { values: ["None"] });
                 const selector = this.addWidget("combo", "profile_selector", "Loading...", () => {}, { values: ["Loading..."] });
                 
-                // 3. Overwrite Button
                 const overwriteBtn = this.addWidget("button", "Overwrite Filename", null, syncSaveAsFilename);
 
                 // --- Reorder Widgets ---
-                // Pop newly added widgets (Reverse order of creation)
                 this.widgets.pop(); // overwrite
                 this.widgets.pop(); // selector
                 this.widgets.pop(); // filter2
@@ -219,14 +212,12 @@ app.registerExtension({
                 this.widgets.pop(); // loadBtn
                 this.widgets.pop(); // saveBtn
 
-                // Place Top Widgets
                 this.widgets.unshift(selector);
                 this.widgets.unshift(filter2);
                 this.widgets.unshift(filter1);
                 this.widgets.unshift(loadBtn);
                 this.widgets.unshift(saveBtn);
 
-                // Insert Overwrite Button
                 const saveAsIdx = this.widgets.findIndex(w => w.name === "save_as_profile");
                 if (saveAsIdx > -1) {
                     this.widgets.splice(saveAsIdx, 0, overwriteBtn);
@@ -236,14 +227,13 @@ app.registerExtension({
 
                 // 4. Load Logic
                 const loadProfileData = (node, profileName) => {
-                    const currentWidth = node.size[0]; // 鎖定寬度
+                    const currentWidth = node.size[0];
                     
                     fetch(`/misaka/load_profile?name=${encodeURIComponent(profileName)}`)
                         .then(r => r.json())
                         .then(data => {
                             if (!data) return;
                             
-                            // A. 填入標準欄位
                             const setVal = (name, val) => {
                                 const w = node.widgets.find(x => x.name === name);
                                 if (w && val !== undefined) w.value = val;
@@ -263,7 +253,6 @@ app.registerExtension({
                                 setVal("scene", data.scene);
                             }
 
-                            // Update "note" node if exists
                             if (data.note !== undefined && app.graph && app.graph._nodes) {
                                 const noteNode = app.graph._nodes.find(n => n.title === "note" && n.type === "CLIPTextEncode");
                                 if (noteNode && noteNode.widgets && noteNode.widgets.length > 0) {
@@ -271,7 +260,6 @@ app.registerExtension({
                                 }
                             }
 
-                            // B. 重建 Loras
                             if (node.widgets) {
                                 for (const w of node.widgets) {
                                     if (w.name.startsWith("lora_")) {
@@ -304,18 +292,15 @@ app.registerExtension({
                                 }
                             }
                             
-                            // Ensure next empty slot exists
                             if (loras.length > 0) {
                                 node.addLoraGroup(loras.length + 1);
                             }
                             
-                            // 恢復寬度，重新計算高度
                             const minH = node.computeSize()[1];
                             node.setSize([currentWidth, minH]);
                             
                             app.graph.setDirtyCanvas(true, true);
                             syncSaveAsFilename();
-                            // alert(`Loaded profile: ${profileName}`); // Remove alert for better UX? User knows.
                         })
                         .catch(e => {
                             alert("Error loading profile: " + e);
@@ -335,46 +320,28 @@ app.registerExtension({
                     const savedValueCount = w.widgets_values.length;
                     const currentWidgetCount = this.widgets ? this.widgets.length : 0;
                     
-                    // 如果存檔的值比現在的欄位多，說明有動態增加的 Lora
                     if (savedValueCount > currentWidgetCount) {
                         const extra = savedValueCount - currentWidgetCount;
-                        // 每組 3 個
                         const groupsToAdd = Math.floor(extra / 3);
                         
                         if (groupsToAdd > 0) {
                             const baseWidget = this.widgets.find(w => w.name === "lora_1");
                             const loraList = baseWidget ? baseWidget.options.values : [];
 
-                            // 從 2 開始加
                             for (let i = 0; i < groupsToAdd; i++) {
                                 const index = i + 2;
                                 const widgetName = `lora_${index}`;
                                 
-                                // 直接加在最後面
                                 const loraWidget = this.addWidget("combo", widgetName, ["None", ...loraList], (v) => {}, { values: loraList });
-                                // 預設值必須是字串 "None"
                                 loraWidget.value = "None"; 
                                 
                                 this.addWidget("number", `l${index}_strength_model`, 1.0, (v) => {}, { step: 0.01, min: -10.0, max: 10.0 });
                                 this.addWidget("number", `l${index}_strength_clip`, 1.0, (v) => {}, { step: 0.01, min: -10.0, max: 10.0 });
                             }
                             
-                            // 修正 ComfyUI 自動填值後的型別問題
-                            // 因為我們是在 onConfigure 之後才加 Widget，ComfyUI 可能已經填完值了 (只填了前面幾個)，
-                            // 或者是因為我們在 onConfigure 裡面加，ComfyUI 還沒填？
-                            // 實際上，onConfigure 的參數 w 包含了 values，但 ComfyUI 的 LGraphNode.configure 
-                            // 會在呼叫 onConfigure 之後，根據 widgets 的數量去填 widgets_values。
-                            // 所以我們在這裡加 widget 是對的。
-                            
-                            // 但是，如果 ComfyUI 已經嘗試把某些值填進去了，可能會出錯。
-                            // 為了保險，我們手動從 w.widgets_values 填入正確的值給新加的 widgets
-                            // 以確保它們有正確的初始狀態
-                            
-                            // 從 currentWidgetCount 開始填
                             for (let i = currentWidgetCount; i < this.widgets.length; i++) {
                                 if (i < w.widgets_values.length) {
                                     let val = w.widgets_values[i];
-                                    // 如果是 Combo，強制轉字串
                                     if (this.widgets[i].type === "combo") {
                                         if (val === undefined || val === null) val = "None";
                                         this.widgets[i].value = String(val);
@@ -411,7 +378,6 @@ app.registerExtension({
                             break; 
                         }
 
-                        // 型別保護：確保 value 是字串
                         if (typeof currentWidget.value !== 'string') {
                             currentWidget.value = String(currentWidget.value || "None");
                         }
@@ -432,7 +398,6 @@ app.registerExtension({
                 if (this.widgets) {
                     for (const w of this.widgets) {
                         if (w.name && w.name.startsWith("lora_") && w.name.split("_").length === 2) {
-                            // 再次確保所有現有 lora widget 都是字串
                             if (typeof w.value !== 'string') w.value = String(w.value || "None");
 
                             if (!w.hasMisakaCallback) {
@@ -498,7 +463,8 @@ app.registerExtension({
                 }
             };
         }
-        // 3. MisakaPromptBuilder 處理邏輯 (動態 Prompt)
+
+        // 3. MisakaImagePromptBuilder 處理邏輯 (動態 Prompt)
         if (nodeData.name === "MisakaImagePromptBuilder") {
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
@@ -516,7 +482,6 @@ app.registerExtension({
                 const promptDataWidget = this.widgets ? this.widgets.find(w => w.name === "prompt_data") : null;
                 if (promptDataWidget) {
                     const texts = [];
-                    // Start from text_2 because text_1 is standard input
                     let i = 2;
                     while (true) {
                         const w = this.widgets.find(x => x.name === `text_${i}`);
@@ -533,7 +498,6 @@ app.registerExtension({
                 if (onConfigure) onConfigure.apply(this, arguments);
                 hideMisakaWidgets(this);
                 
-                // 從 widgets_values 中尋找並恢復動態欄位
                 if (w && w.widgets_values) {
                     let foundTexts = null;
                     
@@ -557,15 +521,12 @@ app.registerExtension({
                             const val = foundTexts[i];
                             const widgetName = `text_${i + 2}`; 
                             
-                            // 如果不存在則建立
                             if (!this.widgets.find(w => w.name === widgetName)) {
                                 app.widgets.STRING(this, widgetName, ["STRING", { multiline: true, default: "", rows: 6 }], app);
                             }
                             
-                            // 無論是否剛建立，都要更新值
                             const w = this.widgets.find(x => x.name === widgetName);
                             if (w) {
-                                // 只有當值不同時才更新，避免游標跳動 (雖然在 onConfigure 裡應該沒差)
                                 if (w.value !== val) {
                                     w.value = val;
                                     console.log(`[Misaka] Restored/Updated ${widgetName} = ${val}`);
@@ -577,7 +538,6 @@ app.registerExtension({
                 
                 this.setupTextLogic();
                 
-                // 強制重繪以解決 Widget 消失問題
                 const forceRedraw = () => {
                     this.setSize(this.computeSize());
                     app.graph.setDirtyCanvas(true, true);
@@ -590,7 +550,6 @@ app.registerExtension({
                 const refreshTexts = () => {
                     if (!this.widgets) return;
 
-                    // 1. 找出所有 text widgets 並排序
                     const textWidgets = this.widgets
                         .filter(w => w.name.startsWith("text_"))
                         .sort((a, b) => {
@@ -599,13 +558,11 @@ app.registerExtension({
                             return idxA - idxB;
                         });
 
-                    if (textWidgets.length === 0) return; // Should at least have text_1
+                    if (textWidgets.length === 0) return;
 
                     const lastWidget = textWidgets[textWidgets.length - 1];
                     const lastIndex = parseInt(lastWidget.name.split("_")[1]);
 
-                    // 綁定 Callback (如果還沒綁)
-                    // 檢查所有 widgets，確保都有 callback
                     for (const w of textWidgets) {
                         if (!w.hasMisakaCallback) {
                             const originalCallback = w.callback;
@@ -617,10 +574,8 @@ app.registerExtension({
                         }
                     }
 
-                    // 邏輯 A: 如果最後一個有值 -> 新增下一個
                     if (lastWidget.value && lastWidget.value.trim() !== "") {
                         const nextName = `text_${lastIndex + 1}`;
-                        // 確保不重複新增
                         if (!this.widgets.find(w => w.name === nextName)) {
                             app.widgets.STRING(this, nextName, ["STRING", { multiline: true, default: "", rows: 6 }], app);
                             const newW = this.widgets.find(w => w.name === nextName);
@@ -628,33 +583,26 @@ app.registerExtension({
                                 newW.callback = (v) => { refreshTexts(); };
                                 newW.hasMisakaCallback = true;
                             }
-                            // 新增後自動調整大小 (只增不減)
                             const minSize = this.computeSize();
                             this.setSize([
                                 Math.max(this.size[0], minSize[0]),
                                 Math.max(this.size[1], minSize[1])
                             ]);
                         }
-                    } 
-                    // 邏輯 B: 如果最後一個是空的
-                    else {
-                        // 檢查倒數第二個
-                        if (textWidgets.length > 1) { // 至少保留 text_1
+                    } else {
+                        if (textWidgets.length > 1) {
                             const prevWidget = textWidgets[textWidgets.length - 2];
-                            // 如果倒數第二個也是空的 -> 刪除最後一個
                             if (!prevWidget.value || prevWidget.value.trim() === "") {
                                 if (lastWidget.onRemove) lastWidget.onRemove();
                                 const idxToRemove = this.widgets.indexOf(lastWidget);
                                 if (idxToRemove > -1) {
                                     this.widgets.splice(idxToRemove, 1);
-                                    // 刪除後不調整大小 (不縮回)，維持高度
                                     app.graph.setDirtyCanvas(true, true);
                                 }
                             }
                         }
                     }
                     
-                    // 3. 同步數據到 prompt_data (關鍵修復：確保 JSON 隨時是最新的)
                     const promptDataWidget = this.widgets.find(w => w.name === "prompt_data");
                     if (promptDataWidget) {
                         const texts = [];
@@ -669,7 +617,6 @@ app.registerExtension({
                     }
                 };
                 
-                // 初始執行
                 refreshTexts();
             };
 
@@ -689,7 +636,6 @@ app.registerExtension({
                     for (const w of widgetsToRemove) {
                         const i = this.widgets.indexOf(w);
                         if (i > -1) {
-                            // 關鍵修正：必須呼叫 onRemove 以清除 DOM 元素
                             if (w.onRemove) {
                                 w.onRemove();
                             }
@@ -706,154 +652,7 @@ app.registerExtension({
             };
         }
 
-        // ── MisakaLoopCkpt / MisakaLoopPrompt — auto-grow input slots ───────────
-        const _loopNodeDefs = {
-            "MisakaLoopCkpt":   { prefix: "ckpt_name", type: "STRING" },
-            "MisakaLoopPrompt": { prefix: "prompt", type: "MISAKA_PROMPT" },
-        };
-        if (_loopNodeDefs[nodeData.name]) {
-            const { prefix, type } = _loopNodeDefs[nodeData.name];
-
-            const _grow = (node) => {
-                // find highest numbered slot
-                let max = 0;
-                for (const inp of node.inputs) {
-                    const m = inp.name.match(new RegExp(`^${prefix}_(\\d+)$`));
-                    if (m) max = Math.max(max, parseInt(m[1]));
-                }
-                if (max === 0) { node.addInput(`${prefix}_1`, type); max = 1; }
-                // if last slot is connected, add a new empty one
-                const lastSlot = node.inputs.find(inp => inp.name === `${prefix}_${max}`);
-                if (lastSlot && lastSlot.link != null) {
-                    node.addInput(`${prefix}_${max + 1}`, type);
-                    app.graph.setDirtyCanvas(true, true);
-                }
-            };
-
-            const _trim = (node) => {
-                // remove trailing empty slots (keep at least 1)
-                let max = 0;
-                for (const inp of node.inputs) {
-                    const m = inp.name.match(new RegExp(`^${prefix}_(\\d+)$`));
-                    if (m) max = Math.max(max, parseInt(m[1]));
-                }
-                while (max > 1) {
-                    const slot = node.inputs.find(inp => inp.name === `${prefix}_${max}`);
-                    const prev = node.inputs.find(inp => inp.name === `${prefix}_${max - 1}`);
-                    if (slot && slot.link == null && prev && prev.link == null) {
-                        node.removeInput(node.inputs.indexOf(slot));
-                        max--;
-                        app.graph.setDirtyCanvas(true, true);
-                    } else break;
-                }
-            };
-
-            const onNodeCreated = nodeType.prototype.onNodeCreated;
-            nodeType.prototype.onNodeCreated = function () {
-                const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
-                _grow(this);
-                return r;
-            };
-
-            const onConfigure = nodeType.prototype.onConfigure;
-            nodeType.prototype.onConfigure = function (info) {
-                if (onConfigure) onConfigure.apply(this, arguments);
-                _grow(this);
-            };
-
-            const onConnectionsChange = nodeType.prototype.onConnectionsChange;
-            nodeType.prototype.onConnectionsChange = function (type, index, connected) {
-                if (onConnectionsChange) onConnectionsChange.apply(this, arguments);
-                if (type !== LiteGraph.INPUT) return;
-                if (connected) _grow(this); else _trim(this);
-            };
-        }
-
-        // MisakaImageScaleCustom — Calculate button
-        if (nodeData.name === "MisakaScaleCustom") {
-            const onNodeCreated = nodeType.prototype.onNodeCreated;
-            nodeType.prototype.onNodeCreated = function () {
-                const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
-                const self = this;
-
-                this.addWidget("button", "Calculate", null, () => {
-                    const ratioWidget = self.widgets.find(w => w.name === "aspect_ratio");
-                    const wWidget    = self.widgets.find(w => w.name === "width");
-                    const hWidget    = self.widgets.find(w => w.name === "height");
-                    if (!ratioWidget || !wWidget || !hWidget) return;
-
-                    const ratio = ratioWidget.value;
-                    if (ratio === "free") return;
-
-                    const [rw, rh] = ratio.split(":").map(Number);
-                    const W = parseInt(wWidget.value) || 0;
-                    const H = parseInt(hWidget.value) || 0;
-
-                    const snap8 = v => Math.max(8, Math.round(v / 8) * 8);
-
-                    if (W > 0 && H === 0) {
-                        hWidget.value = snap8(W * rh / rw);
-                    } else if (H > 0 && W === 0) {
-                        wWidget.value = snap8(H * rw / rh);
-                    } else if (W > 0 && H > 0) {
-                        // width 優先，重算 height
-                        hWidget.value = snap8(W * rh / rw);
-                    }
-
-                    app.graph.setDirtyCanvas(true, true);
-                });
-
-                return r;
-            };
-        }
-
-        // Generic file picker helper
-        const _addFilePicker = (node, widgetName, accept) => {
-            const pathWidget = node.widgets?.find(w => w.name === widgetName);
-            if (!pathWidget) return;
-            node.addWidget("button", "choose file to upload", null, () => {
-                const input = document.createElement("input");
-                input.type = "file";
-                input.accept = accept;
-                input.onchange = async () => {
-                    const file = input.files[0];
-                    if (!file) return;
-                    const body = new FormData();
-                    body.append("image", file);
-                    body.append("type", "input");
-                    body.append("overwrite", "true");
-                    const resp = await fetch("/upload/image", { method: "POST", body });
-                    if (resp.ok) {
-                        pathWidget.value = (await resp.json()).name;
-                        app.graph.setDirtyCanvas(true, true);
-                    }
-                };
-                input.click();
-            });
-        };
-
-        const _AUDIO_NODES = {
-            "MisakaVCConvertBatch": "audio_path",
-            "MisakaVCAudioInfo":    "audio_path",
-            "MisakaVCAutoParams":   "audio_path",
-            "MisakaVCPMGenerate":   "reference_audio",
-        };
-
-        if (_AUDIO_NODES[nodeData.name]) {
-            const widgetName = _AUDIO_NODES[nodeData.name];
-            const onNodeCreated = nodeType.prototype.onNodeCreated;
-            nodeType.prototype.onNodeCreated = function () {
-                const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
-                _addFilePicker(this, widgetName, ".wav,.mp3,.flac,.ogg,.m4a,.aac");
-                return r;
-            };
-        }
-
-        // NOTE: MisakaVCLoadModel uses the dedicated "📂 Browse" picker below
-        // (which reads from ComfyUI/models/rvc/ via /misaka/rvc_*_list), NOT
-        // the generic /upload/image endpoint — .pth / .index are not images.
-
-        // 共用：序列化邏輯 (兩個節點都需要)
+        // 共用：序列化邏輯 (Factory + Manager 共用)
         if (nodeData.name === "MisakaImageProfileFactory" || nodeData.name === "MisakaImagePromptManager") {
              const onSerialize = nodeType.prototype.onSerialize;
              nodeType.prototype.onSerialize = function(o) {
@@ -871,7 +670,6 @@ app.registerExtension({
                     nodeMapWidget.value = JSON.stringify(map);
                 }
 
-                // Lora Data 只有 Factory 需要，但 Manager 做檢查也無妨
                 const loraDataWidget = this.widgets ? this.widgets.find(w => w.name === "lora_data") : null;
                 if (loraDataWidget) {
                     const loras = [];
@@ -895,113 +693,5 @@ app.registerExtension({
                 }
             };
         }
-    }
-});
-
-// ── Voice node file-picker helper ────────────────────────────────────────────
-// Adds a "▼ Browse…" dropdown button next to model_path and index_path STRING
-// widgets on MisakaVCLoadModel so users can pick files without typing full paths.
-app.registerExtension({
-    name: "Misaka.VoiceFilePicker",
-    async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        if (nodeData.name !== "MisakaVCLoadModel") return;
-
-        const onNodeCreated = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function () {
-            const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
-            const node = this;
-
-            // Helper: convert a STRING widget into a pick-from-list UI
-            function addFilePicker(widgetName, apiEndpoint, emptyLabel) {
-                const strWidget = node.widgets?.find(w => w.name === widgetName);
-                if (!strWidget) return;
-
-                // "Browse" button inserted right after the string widget
-                const btn = node.addWidget("button", `📂 ${widgetName}`, null, async () => {
-                    try {
-                        const resp = await fetch(apiEndpoint);
-                        const files = await resp.json();
-
-                        // Build a simple overlay dropdown
-                        const options = emptyLabel ? [emptyLabel, ...files] : files;
-                        if (options.length === 0) {
-                            alert(`No files found.\nPlace .pth/.index files in:\n  ComfyUI/models/rvc/`);
-                            return;
-                        }
-
-                        const overlay = document.createElement("div");
-                        Object.assign(overlay.style, {
-                            position: "fixed", top: 0, left: 0,
-                            width: "100vw", height: "100vh",
-                            background: "rgba(0,0,0,0.5)",
-                            zIndex: 9999, display: "flex",
-                            alignItems: "center", justifyContent: "center",
-                        });
-
-                        const box = document.createElement("div");
-                        Object.assign(box.style, {
-                            background: "#1e1e1e", borderRadius: "8px",
-                            padding: "16px", minWidth: "480px", maxWidth: "80vw",
-                            maxHeight: "70vh", display: "flex", flexDirection: "column",
-                            gap: "8px", boxShadow: "0 8px 32px rgba(0,0,0,0.8)",
-                        });
-
-                        const title = document.createElement("div");
-                        title.textContent = `選擇 ${widgetName}`;
-                        Object.assign(title.style, { color: "#ccc", fontWeight: "bold", fontSize: "14px" });
-                        box.appendChild(title);
-
-                        const list = document.createElement("div");
-                        Object.assign(list.style, { overflowY: "auto", flex: 1 });
-
-                        options.forEach(f => {
-                            const row = document.createElement("div");
-                            const label = f === emptyLabel ? "(無 / 不使用)" : f.split("/").pop();
-                            const sub = f === emptyLabel ? "" : f;
-                            row.innerHTML = `<span style="color:#eee;font-size:13px">${label}</span>` +
-                                (sub ? `<br><span style="color:#888;font-size:10px">${sub}</span>` : "");
-                            Object.assign(row.style, {
-                                padding: "8px 10px", cursor: "pointer",
-                                borderRadius: "4px", marginBottom: "2px",
-                            });
-                            row.onmouseenter = () => row.style.background = "#3a3a3a";
-                            row.onmouseleave = () => row.style.background = "";
-                            row.onclick = () => {
-                                strWidget.value = f === emptyLabel ? "" : f;
-                                if (strWidget.callback) strWidget.callback(strWidget.value);
-                                app.graph.setDirtyCanvas(true);
-                                document.body.removeChild(overlay);
-                            };
-                            list.appendChild(row);
-                        });
-                        box.appendChild(list);
-
-                        const cancelBtn = document.createElement("button");
-                        cancelBtn.textContent = "取消";
-                        Object.assign(cancelBtn.style, {
-                            alignSelf: "flex-end", padding: "4px 16px",
-                            cursor: "pointer", background: "#444", border: "none",
-                            color: "#fff", borderRadius: "4px",
-                        });
-                        cancelBtn.onclick = () => document.body.removeChild(overlay);
-                        box.appendChild(cancelBtn);
-
-                        overlay.appendChild(box);
-                        overlay.onclick = (e) => { if (e.target === overlay) document.body.removeChild(overlay); };
-                        document.body.appendChild(overlay);
-                    } catch (err) {
-                        console.error("[Misaka] file picker error:", err);
-                    }
-                });
-
-                // Style the button compactly
-                btn.serialize = false;
-            }
-
-            addFilePicker("model_path", "/misaka/rvc_model_list", null);
-            addFilePicker("index_path", "/misaka/rvc_index_list", "(空 = 不使用 index)");
-
-            return r;
-        };
     }
 });
