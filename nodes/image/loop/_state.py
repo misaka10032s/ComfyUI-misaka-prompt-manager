@@ -28,6 +28,7 @@ class _LoopState:
     dim_sizes      = {}    # {dimension: M} — "committed": CkptCore reads this each run
     dim_sizes_next = {}    # {dimension: M} — PromptCore writes here; promoted at next CkptCore run
     dim_indices    = {}    # {dimension: idx} — computed by CkptCore.execute
+    dim_alias_list = {}    # {dimension: [alias0, alias1, ...]} — written directly by PromptCore each run
     # solo mode (no CkptCore): per-dimension counter
     solo_indices   = {}    # {dimension: idx}
     lock           = threading.Lock()

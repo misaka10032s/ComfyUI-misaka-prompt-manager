@@ -5,10 +5,11 @@ console.log("[Misaka] Image Loop JS Loading...");
 app.registerExtension({
     name: "Misaka.ImageLoop",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        // MisakaLoopCkptCore / MisakaLoopPromptCore — auto-grow input slots
+        // MisakaLoopCkptCore / MisakaLoopPromptCore / MisakaLoopPathManager — auto-grow input slots
         const _loopNodeDefs = {
-            "MisakaLoopCkptCore":   { prefix: "ckpt_name", type: "STRING" },
-            "MisakaLoopPromptCore": { prefix: "prompt",    type: "MISAKA_PROMPT" },
+            "MisakaLoopCkptCore":    { prefix: "ckpt_name",    type: "STRING" },
+            "MisakaLoopPromptCore":  { prefix: "prompt",       type: "MISAKA_PROMPT" },
+            "MisakaLoopPathManager": { prefix: "conditioning", type: "CONDITIONING" },
         };
         if (!_loopNodeDefs[nodeData.name]) return;
 

@@ -2,7 +2,7 @@ import os
 import re
 import folder_paths
 import comfy.sd
-from ._state import _LoopState, _resolve_prompt_templates
+from ._state import _LoopState
 
 
 class MisakaLoopCkptCore:
@@ -18,15 +18,11 @@ class MisakaLoopCkptCore:
             },
             "optional": {
                 "ckpt_name_1": ("STRING", {"forceInput": True}),
-                "base_folder":  ("STRING", {"default": "images/test", "multiline": False}),
-            },
-            "hidden": {
-                "prompt": "PROMPT",
             },
         }
 
-    RETURN_TYPES = ("MODEL", "CLIP", "VAE", "STRING", "STRING")
-    RETURN_NAMES = ("MODEL", "CLIP", "VAE", "formatted_name", "run_info")
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE")
+    RETURN_NAMES = ("MODEL", "CLIP", "VAE")
     FUNCTION = "execute"
     CATEGORY = "MisakaNodes/Image"
 
@@ -38,7 +34,7 @@ class MisakaLoopCkptCore:
     def VALIDATE_INPUTS(cls, **kwargs):
         return True
 
-    def execute(self, reset_counter=False, base_folder="images/test", prompt=None, **kwargs):
+    def execute(self, reset_counter=False, **kwargs):
         # Collect all ckpt_name_N inputs, skipping gaps (disconnected optional ports are absent)
         entries = []
         for key, val in kwargs.items():
@@ -68,13 +64,13 @@ class MisakaLoopCkptCore:
             for size in dim_sizes.values():
                 dim_product *= max(size, 1)
 
-            total     = N * dim_product
-            run       = _LoopState.run_index % total
+            total    = N * dim_product
+            run      = _LoopState.run_index % total
             _LoopState.current_run = run
             _LoopState.run_index   = (run + 1) % total
 
             # Ckpt is the outermost (slowest) dimension
-            ckpt_idx  = (run // dim_product) % N
+            ckpt_idx = (run // dim_product) % N
 
             # Compute per-prompt-dimension indices (odometer: dim1 slowest, dimN fastest)
             sorted_dims = sorted(dim_sizes.keys())
@@ -85,9 +81,9 @@ class MisakaLoopCkptCore:
                 dim_indices[dim] = remaining % size
                 remaining //= size
 
-            _LoopState.n_ckpts    = N
-            _LoopState.ckpt_idx   = ckpt_idx
-            _LoopState.ckpt_ran   = True
+            _LoopState.n_ckpts     = N
+            _LoopState.ckpt_idx    = ckpt_idx
+            _LoopState.ckpt_ran    = True
             _LoopState.dim_indices = dim_indices
 
         name = names[ckpt_idx]
@@ -105,8 +101,6 @@ class MisakaLoopCkptCore:
         with _LoopState.lock:
             _LoopState.ckpt_stem = ckpt_stem
 
-        resolved_base  = _resolve_prompt_templates(base_folder.strip().rstrip("/"), prompt or {})
-        formatted_name = f"{resolved_base}/{ckpt_stem}"
-        run_info       = f"ckpt {ckpt_idx + 1}/{N}  run {run + 1}/{total}"
-        print(f"[MisakaLoopCkptCore] {run_info}")
-        return (model, clip, vae, formatted_name, run_info)
+        print(f"[MisakaLoopCkptCore] ckpt {ckpt_idx + 1}/{N}: {ckpt_stem}  run {run + 1}/{total}")
+        return (model, clip, vae)
+
