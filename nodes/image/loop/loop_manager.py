@@ -2,7 +2,7 @@ import re
 from ._state import _LoopState, _resolve_prompt_templates
 
 
-class MisakaLoopPathManager:
+class MisakaLoopManager:
     """
     Assembles the final formatted path from all active loop dimensions.
 
@@ -18,6 +18,11 @@ class MisakaLoopPathManager:
         return {
             "required": {
                 "base_folder": ("STRING", {"default": "images/test", "multiline": False}),
+                "reset_counter": ("BOOLEAN", {
+                    "default": False,
+                    "label_on": "Reset (next run restarts from run 1)",
+                    "label_off": "Continue",
+                }),
             },
             "optional": {
                 "model":          ("MODEL",),
@@ -42,7 +47,7 @@ class MisakaLoopPathManager:
     def VALIDATE_INPUTS(cls, **kwargs):
         return True
 
-    def execute(self, base_folder, model=None, unique_id=None, prompt=None, **kwargs):
+    def execute(self, base_folder, reset_counter=False, model=None, unique_id=None, prompt=None, **kwargs):
         resolved_base = _resolve_prompt_templates(base_folder.strip().rstrip("/"), prompt or {})
 
         # Resolve conditioning_N → source PromptCore node_id from the graph, in slot order
@@ -95,6 +100,11 @@ class MisakaLoopPathManager:
         info_parts.append(f"run {run + 1}/{total}")
         run_info = "  ".join(info_parts) + f"\npath: {formatted_name}"
 
-        print(f"[MisakaLoopPathManager] {run_info}")
+        print(f"[MisakaLoopManager] {run_info}")
+
+        if reset_counter:
+            with _LoopState.lock:
+                _LoopState.run_index = 0
+
         return (formatted_name, run_info)
 

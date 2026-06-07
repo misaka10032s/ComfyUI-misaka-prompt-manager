@@ -9,13 +9,7 @@ class MisakaLoopCkptCore:
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {
-                "reset_counter": ("BOOLEAN", {
-                    "default": False,
-                    "label_on": "Reset (next run restarts from run 1)",
-                    "label_off": "Continue",
-                }),
-            },
+            "required": {},
             "optional": {
                 "ckpt_name_1": ("STRING", {"forceInput": True}),
             },
@@ -34,7 +28,7 @@ class MisakaLoopCkptCore:
     def VALIDATE_INPUTS(cls, **kwargs):
         return True
 
-    def execute(self, reset_counter=False, **kwargs):
+    def execute(self, **kwargs):
         # Collect all ckpt_name_N inputs, skipping gaps (disconnected optional ports are absent)
         entries = []
         for key, val in kwargs.items():
@@ -48,9 +42,6 @@ class MisakaLoopCkptCore:
 
         N = len(names)
         with _LoopState.lock:
-            if reset_counter and _LoopState.run_index != 0:
-                _LoopState.run_index = 0
-
             # Promote pending dim_sizes (registered by PromptCore in the previous run).
             # This ensures stale entries from removed PromptCore nodes don't linger.
             if _LoopState.dim_sizes_next:
