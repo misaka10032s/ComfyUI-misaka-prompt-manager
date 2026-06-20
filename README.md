@@ -1,6 +1,6 @@
 # ComfyUI-Misaka-Prompt-Manager
 
-[English](#english) | [繁體中文](#繁體中文) | [日本語](#日本語)
+[English](#english) | [繁體中文](#繁體中文) | [日本語](#日本語) | [Security / 資安](#security)
 
 ---
 
@@ -45,6 +45,22 @@ ComfyUI extension for managing prompt profiles, dynamic prompts, and model asset
 3. Connect `ckpt_name` from Loop Ckpt → Loop Prompt.
 4. Connect `formatted_name` → SaveImage `filename_prefix`.
 5. Set ComfyUI **Batch count** to (number of checkpoints × number of prompts), press Queue once.
+
+#### 8. Misaka Scale Preset / Misaka Scale Custom
+**Purpose:** Resolution helper nodes (category `MisakaNodes`) that output `width`, `height`, `scaled_width`, `scaled_height`, and an `info` string — feed the dimensions to an `EmptyLatentImage` and the scaled pair to an upscaler.
+- **Misaka Scale Preset:** Pick a curated SD1.5 / SDXL resolution from a dropdown (e.g. `832×1216 (2:3 XL)`) and a `scale` (1.0–8.0). Outputs the base size and the ×scale size (rounded to multiples of 8).
+- **Misaka Scale Custom:** Choose an `aspect_ratio` (or `free`) plus `width`/`height`; setting one dimension to `0` derives it from the ratio. `scale` produces the upscaled pair. Click **Calculate** in the UI to resolve both dimensions before running.
+
+#### Voice nodes (category `MisakaNodes/Voice`)
+> Optional. Require the voice dependencies in `requirements.txt` (RVC / VoxCPM packages are optional and may need build tools — see that file).
+
+- **Misaka VC Load Model** — Loads an RVC `.pth` model (optional `.index`) into a `VC_MODEL`. `f0_method` (`harvest` / `crepe` / `rmvpe`) and `device` (`cuda` / `cpu`).
+- **Misaka VC Auto Params** — Analyses an audio file and suggests conversion parameters (`VC_PARAMS`) plus a text report.
+- **Misaka VC Convert Batch** — Converts a whole audio file with an RVC `VC_MODEL`. Long-audio silent-point chunking and overlap are handled internally by the converter. Knobs: `f0_up_key`, `index_rate`, `protect`, `rms_mix_rate`; optional `output_path` to write a WAV/FLAC/OGG/MP3. Outputs `AUDIO` + a report.
+- **Misaka VC Audio Info** — Prints basic audio info (sample rate, duration) without converting; handy for debugging.
+- **Misaka VCPM Generate (TTS)** — VoxCPM TTS with zero-shot voice cloning. Inputs: `model_version` (`VoxCPM2` ref-WAV-only, or `VoxCPM1.5` which also needs `prompt_text` = transcript of the reference), `text`, `reference_audio`. Tuning: `inference_timesteps`, `cfg_value`, `speed`, `split_threshold` (long text is auto-split into chunks), `seed`. Outputs `AUDIO` + an info string.
+
+> **Note:** Realtime mic↔speaker voice conversion (`MisakaVCRealtimeStart/Stop`) is described in `SPEC-voice-conversion.md` but is **not implemented as a node** — only a low-level engine exists.
 
 #### Utility: checkModelType.py
 - **Function:** Scans profiles, identifies model types (Pony/Illustrious) via Civitai URLs in notes, automatically moves files to correct folders, updates checkpoints, and cleans up empty directories.
@@ -93,6 +109,22 @@ ComfyUI extension for managing prompt profiles, dynamic prompts, and model asset
 4. 將 `formatted_name` 接到 SaveImage 的 `filename_prefix`。
 5. ComfyUI 的 **Batch count** 設為（checkpoint 數 × prompt 數），按一次 Queue。
 
+#### 8. Misaka Scale Preset / Misaka Scale Custom
+**用途：** 解析度輔助節點（分類 `MisakaNodes`），輸出 `width`、`height`、`scaled_width`、`scaled_height` 與一段 `info` 文字 —— 把尺寸接到 `EmptyLatentImage`，放大尺寸接到放大節點。
+- **Misaka Scale Preset：** 從下拉選單挑選整理好的 SD1.5 / SDXL 解析度（例如 `832×1216 (2:3 XL)`）與 `scale`（1.0–8.0），輸出原始尺寸與 ×scale 尺寸（對齊 8 的倍數）。
+- **Misaka Scale Custom：** 選擇 `aspect_ratio`（或 `free`）並填 `width`/`height`；其中一邊填 `0` 會依比例推算另一邊。`scale` 產生放大後尺寸。執行前可在 UI 按 **Calculate** 先解出兩邊尺寸。
+
+#### 語音節點（分類 `MisakaNodes/Voice`）
+> 選用功能。需安裝 `requirements.txt` 內的語音相依套件（RVC / VoxCPM 為選用，可能需要編譯工具，詳見該檔）。
+
+- **Misaka VC Load Model** —— 載入 RVC `.pth` 模型（可選 `.index`）成 `VC_MODEL`。可設 `f0_method`（`harvest` / `crepe` / `rmvpe`）與 `device`（`cuda` / `cpu`）。
+- **Misaka VC Auto Params** —— 分析音訊並建議轉換參數（`VC_PARAMS`）及文字報告。
+- **Misaka VC Convert Batch** —— 以 RVC `VC_MODEL` 轉換整段音訊。長音訊的靜音切點分段與 overlap 由轉換器內部處理。可調 `f0_up_key`、`index_rate`、`protect`、`rms_mix_rate`；填 `output_path` 可輸出 WAV/FLAC/OGG/MP3。輸出 `AUDIO` 與報告。
+- **Misaka VC Audio Info** —— 不轉換，僅顯示音訊基本資訊（採樣率、時長），方便除錯。
+- **Misaka VCPM Generate (TTS)** —— VoxCPM 語音合成 + 零樣本語音克隆。輸入：`model_version`（`VoxCPM2` 僅需參考 WAV，或 `VoxCPM1.5` 另需 `prompt_text` = 參考音訊的逐字稿）、`text`、`reference_audio`。可調 `inference_timesteps`、`cfg_value`、`speed`、`split_threshold`（長文字自動分段）、`seed`。輸出 `AUDIO` 與資訊文字。
+
+> **注意：** 即時麥克風↔喇叭語音轉換（`MisakaVCRealtimeStart/Stop`）在 `SPEC-voice-conversion.md` 有描述，但**尚未實作為節點** —— 目前僅有底層引擎。
+
 #### 工具程式：checkModelType.py
 - **功能：** 掃描設定檔，透過筆記中的 Civitai 連結判斷模型類型 (Pony/Illustrious)，自動將檔案移動至正確資料夾、更新 Checkpoint 欄位，並清理空資料夾。
 
@@ -140,5 +172,38 @@ ComfyUI extension for managing prompt profiles, dynamic prompts, and model asset
 4. `formatted_name` を SaveImage の `filename_prefix` に接続。
 5. ComfyUI の **Batch count** を（チェックポイント数 × プロンプト数）に設定し、Queue を1回押す。
 
+#### 8. Misaka Scale Preset / Misaka Scale Custom
+**目的:** 解像度補助ノード（カテゴリ `MisakaNodes`）。`width`、`height`、`scaled_width`、`scaled_height` と `info` 文字列を出力します。サイズを `EmptyLatentImage` に、拡大サイズをアップスケーラーに接続します。
+- **Misaka Scale Preset:** 厳選した SD1.5 / SDXL 解像度（例: `832×1216 (2:3 XL)`）と `scale`（1.0–8.0）をドロップダウンで選択。元サイズと ×scale サイズ（8 の倍数に丸め）を出力します。
+- **Misaka Scale Custom:** `aspect_ratio`（または `free`）と `width`/`height` を指定。一方を `0` にすると比率からもう一方を算出します。`scale` で拡大後サイズを生成。実行前に UI の **Calculate** で両寸法を確定できます。
+
+#### 音声ノード（カテゴリ `MisakaNodes/Voice`）
+> オプション。`requirements.txt` の音声依存パッケージが必要です（RVC / VoxCPM はオプションでビルドツールが要る場合あり。同ファイル参照）。
+
+- **Misaka VC Load Model** — RVC `.pth` モデル（任意で `.index`）を `VC_MODEL` として読み込み。`f0_method`（`harvest` / `crepe` / `rmvpe`）と `device`（`cuda` / `cpu`）。
+- **Misaka VC Auto Params** — 音声を分析し変換パラメータ（`VC_PARAMS`）とテキストレポートを提案。
+- **Misaka VC Convert Batch** — RVC `VC_MODEL` で音声ファイル全体を変換。長尺音声の無音点分割とオーバーラップはコンバーター内部で処理されます。調整: `f0_up_key`、`index_rate`、`protect`、`rms_mix_rate`。`output_path` で WAV/FLAC/OGG/MP3 出力。`AUDIO` とレポートを出力。
+- **Misaka VC Audio Info** — 変換せず音声の基本情報（サンプルレート、長さ）を表示。デバッグ用。
+- **Misaka VCPM Generate (TTS)** — VoxCPM による TTS + ゼロショット音声クローン。入力: `model_version`（`VoxCPM2` は参照 WAV のみ、`VoxCPM1.5` は `prompt_text` = 参照音声の文字起こしも必要）、`text`、`reference_audio`。調整: `inference_timesteps`、`cfg_value`、`speed`、`split_threshold`（長文は自動分割）、`seed`。`AUDIO` と情報文字列を出力。
+
+> **注意:** リアルタイムのマイク↔スピーカー音声変換（`MisakaVCRealtimeStart/Stop`）は `SPEC-voice-conversion.md` に記載されていますが、**ノードとしては未実装**です（低レベルエンジンのみ存在）。
+
 #### ユーティリティ: checkModelType.py
 - **機能:** プロファイルをスキャンし、ノート内の Civitai URL を介してモデルタイプ (Pony/Illustrious) を判別します。ファイルを正しいフォルダに自動的に移動し、チェックポイントを更新して、空のディレクトリを削除します。
+
+---
+
+<a name="security"></a>
+## Security / 資安警示 / セキュリティ
+
+**EN —**
+- **Do not expose ComfyUI with `--listen` on an untrusted network.** This extension adds server routes (`/misaka/load_profile`, `/misaka/save_profile`, …) that read and write files under the profile storage directory. Profile names are now validated against path traversal, but the safest posture is to keep ComfyUI bound to `127.0.0.1`.
+- **RVC models are loaded with `torch.load(weights_only=False)`** (`voice/rvc_wrapper.py:369`), which **deserializes arbitrary Python pickle** and can execute code on load. **Only load `.pth` RVC models from sources you trust.**
+
+**繁體中文 —**
+- **請勿以 `--listen` 將 ComfyUI 暴露到不信任的網路。** 本擴充功能新增了會在設定檔儲存目錄下讀寫檔案的伺服器路由（`/misaka/load_profile`、`/misaka/save_profile` 等）。設定檔名稱現已加上 path traversal 防護，但最安全的做法仍是讓 ComfyUI 綁定在 `127.0.0.1`。
+- **RVC 模型以 `torch.load(weights_only=False)` 載入**（`voice/rvc_wrapper.py:369`），會**反序列化任意 Python pickle**，載入時可能執行程式碼。**僅載入可信任來源的 `.pth` RVC 模型。**
+
+**日本語 —**
+- **信頼できないネットワークで `--listen` を使って ComfyUI を公開しないでください。** 本拡張はプロファイル保存ディレクトリ配下でファイルを読み書きするサーバールート（`/misaka/load_profile`、`/misaka/save_profile` など）を追加します。プロファイル名はパストラバーサル対策済みですが、ComfyUI を `127.0.0.1` にバインドしておくのが最も安全です。
+- **RVC モデルは `torch.load(weights_only=False)` で読み込まれます**（`voice/rvc_wrapper.py:369`）。これは**任意の Python pickle をデシリアライズ**し、読み込み時にコードを実行し得ます。**信頼できる提供元の `.pth` RVC モデルのみを読み込んでください。**
