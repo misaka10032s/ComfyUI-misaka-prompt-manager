@@ -9,18 +9,22 @@
 
 ```
 ComfyUI-misaka-prompt-manager/
-  voice/
+  voice/                   # 底層引擎（非 ComfyUI 節點）
     __init__.py
-    segmentation.py      # 靜音偵測與切割點計算
-    crossfade.py         # Cross-fade 拼接
-    resampler.py         # 高品質重採樣（soxr）
-    auto_params.py       # 自動判斷 RVC 參數
-    rvc_wrapper.py       # RVC 推理封裝（batch + realtime）
-    realtime_stream.py   # 麥克風 ↔ 喇叭即時串流
-  voice_nodes.py         # 所有 ComfyUI 節點定義（對應 misaka_node.py 風格）
+    resampler.py           # 高品質重採樣（soxr）
+    auto_params.py         # 自動判斷 RVC 參數
+    rvc_wrapper.py         # RVC 推理封裝；convert() 內建靜音切點分段 + overlap
+    realtime_stream.py     # 麥克風 ↔ 喇叭即時串流（藍圖引擎，尚未接成節點）
+  nodes/voice/             # 實際 ComfyUI 節點實作（取代原規劃的 voice_nodes.py）
+    load_model.py / auto_params.py / convert_batch.py / audio_info.py / pm_generate.py
 ```
 
-`voice_nodes.py` 的 `NODE_CLASS_MAPPINGS` 要併入 `__init__.py` 的主對應表。
+> **與原規格差異（誠實註記）**：
+> - 原規劃的 `segmentation.py`（`find_cut_points`）與 `crossfade.py`（`concat_with_crossfade`）
+>   為獨立的靜音分段／拼接實作，但從未被任何節點使用 —— `RVCConverter.convert()` 已內建
+>   等效的 Ultimate-RVC 靜音切點分段與 overlap 處理，故這兩個檔案已移除（死碼）。
+> - 節點實作位於 `nodes/voice/`，不存在獨立的 `voice_nodes.py`。`NODE_CLASS_MAPPINGS`
+>   由 `nodes/voice/__init__.py` 匯出並併入外掛根 `__init__.py` 的主對應表。
 
 ---
 
@@ -49,7 +53,10 @@ pesq>=0.0.4              # 語音品質感知分數（用於 auto_params）
 
 ## 核心模組規格
 
-### `voice/segmentation.py`
+### `voice/segmentation.py` 〔已移除 — 死碼〕
+
+> 未被任何節點使用；等效分段已內建於 `RVCConverter.convert()`。檔案已刪除，
+> 以下保留為演算法參考。
 
 **功能**：將長音訊找到適合切割的靜音點，避免在有聲音處截斷。
 
@@ -81,7 +88,11 @@ def find_cut_points(
 
 ---
 
-### `voice/crossfade.py`
+### `voice/crossfade.py` 〔已移除 — 死碼〕
+
+> 未被任何節點使用；等效 overlap 拼接已內建於 `RVCConverter.convert()`。檔案已刪除，
+> 以下保留為演算法參考。
+
 
 **功能**：將 RVC 轉換後的分段音訊無縫拼接。
 
@@ -309,12 +320,14 @@ RETURN_TYPES:  ("STRING", "STRING")
 RETURN_NAMES: ("output_path", "report")
 ```
 
-**執行流程**：
-1. 載入音訊 → `detect_sr()` → `resample()` 到模型原生 sr
-2. `find_cut_points()` 取得 segments
-3. 各段 `converter.convert()` 
-4. `concat_with_crossfade()` 拼接
-5. `soundfile.write()` 輸出
+**執行流程（實際實作）**：
+1. 載入音訊 → `detect_sr()` → 轉單聲道 float32
+2. `converter.convert()` —— 分段（靜音切點）與 overlap 拼接由 `RVCConverter.convert()`
+   內部處理（Ultimate-RVC 演算法），不需外部 `find_cut_points` / `concat_with_crossfade`
+3. 若提供 `output_path` 則 `soundfile.write()` 輸出，否則回傳 `AUDIO`
+
+> 註：上方 `min_silence_ms` / `overlap_ms` / `fade_ms` / `max_segment_sec` 為原規格的
+> 外部分段參數，實際實作未暴露 —— 分段已內建於 wrapper，這些旋鈕目前不存在。
 
 ---
 

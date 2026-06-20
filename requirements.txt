@@ -8,24 +8,25 @@
 # Voice nodes — core audio pipeline (always required)
 # ============================================================
 
-# voice/segmentation.py      → find_cut_points (librosa.effects.split)
 # voice/auto_params.py       → analyze_audio (librosa.feature.rms, librosa.yin)
-# voice/crossfade.py         → (numpy only, bundled)
-# voice_nodes.py             → MisakaVCAudioInfo, MisakaVCAutoParams
+# nodes/voice/auto_params.py → MisakaVCAutoParams
+# nodes/voice/pm_generate.py → MisakaVCPMGenerate (time_stretch for speed control)
 librosa>=0.10.0
 
 # voice/resampler.py         → detect_sr, soundfile.info
-# voice_nodes.py             → MisakaVCConvertBatch (soundfile.write)
-# voice_nodes.py             → MisakaVCAudioInfo (soundfile.info)
+# nodes/voice/convert_batch.py → MisakaVCConvertBatch (soundfile read/write)
+# nodes/voice/audio_info.py    → MisakaVCAudioInfo (soundfile.info)
+# nodes/voice/pm_generate.py   → MisakaVCPMGenerate (chunk read/write)
 soundfile>=0.12.1
 
-# voice/resampler.py         → resample() — high-quality resampling (no aliasing)
-# voice_nodes.py             → MisakaVCConvertBatch (input/output resampling)
-# voice/realtime_stream.py   → _stream_worker (realtime resampling)
+# voice/resampler.py           → resample() — high-quality resampling (no aliasing)
+# nodes/voice/convert_batch.py → MisakaVCConvertBatch (input/output resampling)
+# voice/rvc_wrapper.py         → RVCConverter.convert (16 kHz resample)
 soxr>=0.3.7
 
 # voice/realtime_stream.py   → sounddevice.Stream (mic/speaker I/O)
-# voice_nodes.py             → MisakaVCRealtimeStart, MisakaVCRealtimeStop
+# NOTE: realtime streaming is a blueprint engine only — no ComfyUI node is
+#       registered for it yet (see SPEC-voice-conversion.md Node 4/5).
 sounddevice>=0.4.6
 
 # voice/rvc_wrapper.py       → _extract_f0 medfilt (F0 smoothing)
@@ -40,8 +41,9 @@ scipy>=1.11.0
 #   python_embeded\python.exe -m pip install rvc-python --no-deps
 # ============================================================
 
-# voice/rvc_wrapper.py       → RVCInference (full voice conversion pipeline)
-# voice_nodes.py             → MisakaVCLoadModel, MisakaVCConvertBatch
+# voice/rvc_wrapper.py         → RVCConverter (full voice conversion pipeline)
+# nodes/voice/load_model.py    → MisakaVCLoadModel
+# nodes/voice/convert_batch.py → MisakaVCConvertBatch
 praat-parselmouth>=0.4.3
 pyworld>=0.3.4
 torchcrepe>=0.0.23
@@ -52,7 +54,7 @@ faiss-cpu
 # Voice nodes — VoxCPM TTS (optional, for TTS + voice cloning)
 # ============================================================
 
-# voice_nodes.py             → MisakaVCPMLoadModel, MisakaVCPMGenerate
+# nodes/voice/pm_generate.py → MisakaVCPMGenerate (model load is internal via _vcpm_load)
 # Supports VoxCPM2 (ref WAV only) and VoxCPM1.5 (ref WAV + ref text)
 voxcpm>=0.1.0
 
