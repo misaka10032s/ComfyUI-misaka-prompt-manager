@@ -1,7 +1,7 @@
 import os
 import json
 import folder_paths
-from ._shared import apply_assets, get_storage_path, process_output_name
+from ._shared import apply_assets, get_storage_path, process_output_name, resolve_profile_path
 
 
 class MisakaImagePromptManager:
@@ -34,7 +34,8 @@ class MisakaImagePromptManager:
             raise ValueError("Select a profile")
 
         base = get_storage_path()
-        with open(os.path.join(base, profile + ".json"), 'r', encoding='utf-8') as f:
+        profile_path = resolve_profile_path(base, profile)
+        with open(profile_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
         prompt_input = {}

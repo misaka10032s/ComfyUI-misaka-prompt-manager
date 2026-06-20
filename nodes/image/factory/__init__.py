@@ -1,7 +1,7 @@
 from .profile_factory import MisakaImageProfileFactory
 from .prompt_manager import MisakaImagePromptManager
 from .prompt_builder import MisakaImagePromptBuilder
-from ._shared import get_storage_path  # re-export for __init__.py API route
+from ._shared import get_storage_path, resolve_profile_path  # re-export for __init__.py API routes
 
 NODE_CLASS_MAPPINGS = {
     "MisakaImageProfileFactory": MisakaImageProfileFactory,

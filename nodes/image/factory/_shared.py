@@ -91,6 +91,10 @@ def get_storage_path():
     return os.path.abspath(os.path.join(plugin_root, "../../user/default/misaka-prompt-sets"))
 
 
+# Path-traversal-safe resolver lives in a dep-free module so it stays unit-testable.
+from ._paths import resolve_profile_path  # noqa: F401  (re-exported)
+
+
 def process_output_name(name_template, prompt=None, extra_pnginfo=None, node_map_str=None, checkpoint_name=None):
     if not name_template:
         return "ComfyUI"

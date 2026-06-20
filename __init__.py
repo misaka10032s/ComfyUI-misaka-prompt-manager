@@ -33,7 +33,7 @@ _ensure_packages()
 
 from .nodes.image import NODE_CLASS_MAPPINGS as _IMAGE_NODES
 from .nodes.image import NODE_DISPLAY_NAME_MAPPINGS as _IMAGE_NAMES
-from .nodes.image.factory import get_storage_path
+from .nodes.image.factory import get_storage_path, resolve_profile_path
 
 try:
     from .nodes.voice import NODE_CLASS_MAPPINGS as _VOICE_NODES
@@ -73,7 +73,10 @@ async def load_profile(request):
         return web.Response(status=400)
 
     base = get_storage_path()
-    path = os.path.join(base, name + ".json")
+    try:
+        path = resolve_profile_path(base, name)
+    except ValueError:
+        return web.Response(status=400, text="Invalid profile name")
     if not os.path.exists(path):
         return web.Response(status=404)
 
@@ -107,7 +110,10 @@ async def save_profile(request):
             else:
                 relative_save_path = filename
 
-        save_path = os.path.join(base, relative_save_path + ".json")
+        try:
+            save_path = resolve_profile_path(base, relative_save_path)
+        except ValueError:
+            return web.Response(status=400, text="Invalid filename")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         with open(save_path, 'w', encoding='utf-8') as f:
