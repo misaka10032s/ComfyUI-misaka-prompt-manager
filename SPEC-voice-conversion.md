@@ -237,6 +237,14 @@ class RealtimeVCStream:
 
 所有節點 `CATEGORY = "MisakaNodes/Voice"`
 
+> **實作狀態（2026-06）**：本規格為設計藍圖。實際節點實作位於 `nodes/voice/`，
+> 已註冊的節點為 `MisakaVCLoadModel` / `MisakaVCAutoParams` / `MisakaVCConvertBatch` /
+> `MisakaVCAudioInfo` / `MisakaVCPMGenerate`（TTS）。
+> **Node 4/5 即時串流（`MisakaVCRealtimeStart` / `MisakaVCRealtimeStop`）尚未實作為 ComfyUI 節點**：
+> 底層引擎 `voice/realtime_stream.py:RealtimeVCStream` 已存在，但沒有對應的節點類別、
+> `VC_STREAM` 型別串接或 JS 裝置列舉支援，因此目前不在節點清單中。下方規格保留為待辦藍圖，
+> 不代表已交付功能。
+
 ---
 
 ### Node 1：`MisakaVCLoadModel`
@@ -310,9 +318,10 @@ RETURN_NAMES: ("output_path", "report")
 
 ---
 
-### Node 4：`MisakaVCRealtimeStart`
+### Node 4：`MisakaVCRealtimeStart` 〔未實作 — 藍圖〕
 
 **用途**：啟動即時 VC 串流（非阻塞，後台執行）。
+*目前狀態：未實作為 ComfyUI 節點（見本節開頭實作狀態說明）。*
 
 ```python
 INPUT_TYPES:
@@ -333,9 +342,10 @@ RETURN_NAMES: ("stream_handle", "status")
 
 ---
 
-### Node 5：`MisakaVCRealtimeStop`
+### Node 5：`MisakaVCRealtimeStop` 〔未實作 — 藍圖〕
 
 **用途**：停止即時 VC 串流。
+*目前狀態：未實作為 ComfyUI 節點（見本節開頭實作狀態說明）。*
 
 ```python
 INPUT_TYPES:
