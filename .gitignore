@@ -62,3 +62,6 @@ impeccable-out/
 # Catch-all for *.local.* / *.local config/env overrides
 *.local.*
 *.local
+
+# Backup files created by propagation scripts
+*.bak-*
