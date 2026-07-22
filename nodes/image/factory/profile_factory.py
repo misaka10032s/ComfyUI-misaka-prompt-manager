@@ -1,7 +1,7 @@
 import os
 import json
 import folder_paths
-from ._shared import apply_assets, get_storage_path, process_output_name
+from ._shared import apply_assets, get_storage_path, process_output_name, resolve_profile_path
 
 
 class MisakaImageProfileFactory:
@@ -70,8 +70,6 @@ class MisakaImageProfileFactory:
                 model_stem = os.path.splitext(os.path.basename(checkpoint))[0]
                 base_path = f"{base_path}/{model_stem}"
 
-            save_path = os.path.join(base_path, save_as_profile.strip() + ".json")
-
             note_content = ""
             if extra_pnginfo and "workflow" in extra_pnginfo:
                 for n in extra_pnginfo["workflow"].get("nodes", []):
@@ -82,6 +80,7 @@ class MisakaImageProfileFactory:
                         break
 
             try:
+                save_path = resolve_profile_path(base_path, save_as_profile.strip())
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 data = {
                     "checkpoint": checkpoint,
