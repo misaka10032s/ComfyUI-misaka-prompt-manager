@@ -30,7 +30,17 @@ revisions:
     summary: "commit b13acaa — 由單一 misaka_node.py 拆分為 nodes/image/factory/ 套件，類別重新命名為 MisakaImageProfileFactory / MisakaImagePromptManager"
   - date: 2026-06-20
     summary: "commit cab4ac0 — 修復 path traversal：新增 nodes/image/factory/_paths.py:resolve_profile_path()（realpath + os.path.commonpath 校驗），套用於 __init__.py 的 /misaka/save_profile /misaka/load_profile 路由與 MisakaImagePromptManager.load()。注意：MisakaImageProfileFactory.execute() 的 save_as_profile 節點內建存檔路徑**未套用此修復**（見下方「已知問題」）"
+  - date: 2026-07-22
+    summary: "commit 3ce3b4a — 補上 MisakaImageProfileFactory.execute() 的 save_as_profile 節點存檔路徑防護：改用 resolve_profile_path()（與 cab4ac0 的路由/Manager 相同函式），拒絕時走既有 except 分支（記錄 log、不寫檔），行為與路由一致。缺口已關閉（見下方「已修復」）"
 origin: "prompt（repo root，需求逐字稿）"
+tests:
+  - date: 2026-07-22
+    target: "nodes/image/factory/profile_factory.py › MisakaImageProfileFactory.execute() 的 save_as_profile 節點存檔路徑"
+    action: "python tests/test_path_traversal.py（新增 test_node_save_traversal_rejected／test_node_save_normal_name_still_saves；透過 stub folder_paths/comfy.sd/comfy.utils 驅動 execute()，不需真實 ComfyUI 安裝）"
+    expected: "跳出路徑（../escaped／..\\escaped／../../escaped）遭 resolve_profile_path() 拒絕、storage root 外無任何檔案落地；一般名稱（my_profile）仍正常存檔於 base/my_profile.json"
+    result: "PASS — 8/8（修復前先跑出 RED：test_node_save_traversal_rejected 因 '../escaped' 逃逸至 storage root 外而 FAIL，證明缺口存在；套用修復後全數 PASS，含既有 5 個測試）"
+    evidence: tests/test_path_traversal.py
+    executor: implementer-subagent（BP-IMG-1 security fix，2026-07-22）
 ---
 
 ## 設計說明
@@ -97,8 +107,8 @@ sequenceDiagram
 
     Note over U,Node: 存檔路徑 B（節點執行時的 save_as_profile widget）
     U->>Node: Queue（save_as_profile 非空）
-    Node->>Node: os.path.join(base, save_as_profile) — **未呼叫 resolve_profile_path()**
-    Node->>FS: 寫入 json（見「已知問題」）
+    Node->>Node: resolve_profile_path()（2026-07-22 commit 3ce3b4a 已修復，拒絕逃逸 base）
+    Node->>FS: 寫入 json
 
     Note over U,Node: 讀取路徑（PromptManager，已修復）
     U->>Node: Queue（選定 profile）
@@ -106,13 +116,18 @@ sequenceDiagram
     Node->>FS: 讀取 json
 ```
 
-## 已知問題（誠實揭露，尚未修復）
+## 已修復（2026-07-22，commit 3ce3b4a）
 
 `MisakaImageProfileFactory.execute()` 的 `save_as_profile` 存檔路徑
-（`nodes/image/factory/profile_factory.py:73`）用 `os.path.join(base_path, save_as_profile.strip() + ".json")`
+（原 `nodes/image/factory/profile_factory.py:73`）曾用 `os.path.join(base_path, save_as_profile.strip() + ".json")`
 直接組路徑,**沒有呼叫** `resolve_profile_path()`——這與 `cab4ac0`（2026-06-20）修的
 REST `/misaka/save_profile` 路由、`MisakaImagePromptManager.load()` 不同（見 BP-API-1）。
 ComfyUI 的執行 API（`POST /prompt`）接受完整 workflow JSON（含 widget 值）,任何呼叫者理論上
 可送出一個把 `save_as_profile` 設為 `../../../xxx` 的 graph,透過此節點的 `execute()` 寫檔到
-storage root 之外——REST 路由的修復未覆蓋這條路徑。**未實際驗證是否可利用**（無 PoC/測試),
-僅在此誠實記錄為未解決缺口,供後續排查。
+storage root 之外——REST 路由的修復當時未覆蓋這條路徑。
+
+**修復**：`execute()` 改用與路由/Manager 相同的 `resolve_profile_path(base_path, save_as_profile.strip())`
+計算存檔路徑,拒絕（`ValueError`）時走既有 `except Exception` 分支（記錄 log、不寫檔),
+行為與 REST 路由一致。先以 `tests/test_path_traversal.py::test_node_save_traversal_rejected`
+在修復前跑出 RED（`'../escaped'` 確實逃逸至 storage root 外),修復後轉 PASS,並新增
+`test_node_save_normal_name_still_saves` 覆蓋一般名稱仍可正常存檔的迴歸(見 `tests` 欄位)。
