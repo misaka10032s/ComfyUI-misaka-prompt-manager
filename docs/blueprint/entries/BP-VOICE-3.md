@@ -15,6 +15,9 @@ exec_links:
   - docs/superpowers/specs/SPEC-voice-conversion.md#node-5-misakavcrealtimestop-未實作—藍圖
   - voice/realtime_stream.py
   - .claude/CLAUDE.md（"Realtime streaming nodes...NOT registered...do not delete without checking the roadmap task first"）
+superpowers:
+  - path: docs/superpowers/specs/SPEC-voice-conversion.md
+    label: 語音轉換 spec（Node 4/5 段落）
 revisions:
   - date: 2026-04-17
     summary: "commit 56444c8 — MisakaVCRealtimeStart/Stop 類別隨 voice_nodes.py 一併寫入（原始 398 行版本），但從未加入該次 commit 的 NODE_CLASS_MAPPINGS——即從第一個相關 commit 起就是「已寫程式碼、未註冊」的狀態"

@@ -21,6 +21,9 @@ exec_links:
   - js/voice.js（前端檔案挑選器，見 BP-UI-4）
   - README.md#voice-nodes
   - README.md#security（`torch.load(weights_only=False)` 風險警示）
+superpowers:
+  - path: docs/superpowers/specs/SPEC-voice-conversion.md
+    label: 語音轉換 spec
 done_date: 2026-06-20
 revisions:
   - date: 2026-04-17
