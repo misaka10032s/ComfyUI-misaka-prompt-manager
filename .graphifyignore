@@ -1,0 +1,79 @@
+# USER-PRIVATE - never ingest. prompt.txt is the owner's private scratch file and must
+# never enter the corpus, the graph, or the wiki. .graphifyignore REPLACES .gitignore as
+# graphify's only ignore source, so this line has to live here even when it is also a
+# .gitignore rule. (Cluster-wide rollout 2026-08-14 after several graphs were found to
+# have already ingested it.)
+/prompt.txt
+
+# graphify corpus scope. This file REPLACES .gitignore as graphify's only ignore
+# source - it does not inherit from it - so the .gitignore rules are mirrored below.
+# Seeded 2026-08-14 during the /prompt.txt rollout.
+
+# IDE and OS specific
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Environments
+backend/venv/
+frontend/node_modules/
+nodejs/
+
+# Secrets - IMPORTANT
+.env
+.env.*
+
+# Databases
+/db/
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
+
+# Backend
+/backend/__pycache__/
+/backend/.venv/
+
+# Build artifacts
+frontend/dist/
+*.pyc
+__pycache__/
+
+# Local Database
+# Be careful if you have initial data that needs to be versioned.
+# Generally, local data should be ignored.
+db/data/
+
+# Log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === Claude Code / graphify ===
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
+.claude/worktree/
+
+# Generated knowledge graph
+graphify-out/
+
+# Agent / browser-test artifacts — never tracked
+final_runs/
+screenshots/
+**/screenshots/
+*.screenshot.png
+.playwright-mcp/
+.impeccable/
+impeccable-out/
+.remember/
+
+# Catch-all for *.local.* / *.local config/env overrides
+*.local.*
+*.local
+
+# Backup files created by propagation scripts
+*.bak-*
