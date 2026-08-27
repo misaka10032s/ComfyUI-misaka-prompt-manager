@@ -30,6 +30,10 @@ frontend/dist/
 *.pyc
 __pycache__/
 
+# Quality-gate tool caches (regenerated every run, never inputs)
+.mypy_cache/
+.ruff_cache/
+
 # Local Database
 # Be careful if you have initial data that needs to be versioned.
 # Generally, local data should be ignored.

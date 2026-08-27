@@ -1,0 +1,32 @@
+#!/bin/sh
+# L0 quality gate (G1 lint, G2 typecheck, G3 tests+assertions) — runs only when the commit
+# stages Python files. Enable once per clone/machine:
+#   git config core.hooksPath .githooks
+# (core.hooksPath is local, per-clone config — it does NOT travel with the repo, so a fresh
+# clone or a new machine has this hook silently absent until the command above is run again.)
+#
+# Uses `if ! cmd; then ... fi`, NOT `cmd; if [ $? -ne 0 ]` — under `set -e`, a plain failing
+# command aborts the script immediately and the `if [ $? -ne 0 ]` check below it never runs
+# (silently skipping the gate). `if ! cmd; then` evaluates `cmd`'s exit status as part of the
+# conditional itself, so `set -e` does not fire on it.
+set -e
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+staged_py=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+
+if [ -n "$staged_py" ]; then
+  checked_count=$(printf '%s\n' "$staged_py" | grep -c .)
+  echo "[pre-commit] $checked_count staged .py file(s) — running quality-gates l0 (G1 lint, G2 typecheck, G3 tests+assertions)..."
+  if ! py -3.11 quality-gates/run.py l0; then
+    echo "[pre-commit] checked: $checked_count staged .py file(s) | skipped: 0 (l0 gate) — FAILED, commit blocked."
+    echo "[pre-commit] fix the above and retry, or --no-verify to bypass (discouraged, logged as a rule violation)."
+    exit 1
+  fi
+  echo "[pre-commit] checked: $checked_count staged .py file(s) | skipped: 0 (l0 gate) — PASSED."
+else
+  echo "[pre-commit] checked: 0 staged .py file(s) | skipped: l0 gate (no Python files staged)."
+fi
+
+exit 0

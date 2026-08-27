@@ -1,0 +1,5 @@
+# The pre-commit hook is a POSIX shell script executed by Git Bash's `sh`. On Windows,
+# git's global core.autocrlf=true would otherwise convert its LF line endings to CRLF on
+# checkout, which can break `sh` parsing (a stray \r after `set -e` / `if ! cmd; then`).
+# Force LF regardless of the checkout machine's autocrlf setting.
+.githooks/pre-commit text eol=lf
