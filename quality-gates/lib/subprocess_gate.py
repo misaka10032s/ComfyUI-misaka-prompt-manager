@@ -53,7 +53,7 @@ def run_with_exit_code_guard(
     fine". Use for tools whose exit code reliably distinguishes "ran, N findings" from
     "crashed" — that is ruff and mypy.
     """
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode not in success_codes:
         raise GateToolCrashed(
             tool_name,

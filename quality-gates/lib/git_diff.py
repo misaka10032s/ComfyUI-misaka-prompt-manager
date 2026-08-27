@@ -35,7 +35,7 @@ def ensure_utf8_stdio() -> None:
 
 def _git(args: list[str], cwd: Path) -> str:
     return subprocess.run(
-        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True, encoding="utf-8"
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace"
     ).stdout
 
 
