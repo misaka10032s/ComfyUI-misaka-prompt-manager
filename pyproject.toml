@@ -1,0 +1,75 @@
+[tool.pytest.ini_options]
+# Presence of this table alone is load-bearing: without it, pytest's config-file discovery
+# does not stop at this file (an empty `pyproject.toml` table doesn't count) and keeps
+# climbing to the outer ComfyUI installation's own `ComfyUI/pytest.ini` (`testpaths = tests,
+# tests-unit`, relative to ITS OWN directory, not this repo) — that produced a
+# "No files were found in testpaths" warning when G3 runs with cwd=tests/ (harmless in
+# practice, since pytest falls back to recursive discovery, but this makes the config
+# self-contained instead of silently depending on an unrelated host installation's ini).
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    "__pycache__",
+    ".claude",
+    "misaka_node.py.bak",
+    ".mypy_cache",
+    ".ruff_cache",
+]
+
+[tool.ruff.lint]
+# Ruff's own stable defaults (pyflakes + pycodestyle E4/E7/E9), stated explicitly so this
+# config is never silently widened by ruff's own future default changes, and deliberately
+# does NOT inherit the ComfyUI host's own pyproject.toml (T20/W29x etc — this repo
+# intentionally does not lint print()-based console feedback, a ComfyUI-node convention).
+select = ["E4", "E7", "E9", "F"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["nodes", "voice", "__init__.py", "convert_workflows.py"]
+exclude = 'misaka_node\.py\.bak$'
+# The repo's own directory name (ComfyUI-misaka-prompt-manager, and any worktree slug under
+# .claude/worktree/) contains hyphens, which is not a valid Python identifier — mypy's default
+# implicit-namespace-package inference refuses to name that directory as a package ("contains
+# __init__.py but is not a valid Python package name") the moment __init__.py is checked
+# directly. explicit_package_bases + mypy_path="." makes mypy resolve module names from this
+# config file's own directory instead of walking up and trying to name its parent.
+explicit_package_bases = true
+mypy_path = "."
+
+# Host-provided modules injected by the ComfyUI runtime at import time — they do not exist
+# as installable packages and are never resolvable in a bare interpreter (see
+# .claude/CLAUDE.md -> Code quality gates for the full rationale):
+#   comfy / comfy.*  - the ComfyUI core package (comfy.sd, comfy.utils, ...)
+#   folder_paths     - ComfyUI's model/output path registry
+#   server           - ComfyUI's aiohttp PromptServer
+# Optional, not-auto-installed third-party deps (requirements.txt: manual install only):
+#   voxcpm           - VoxCPM TTS (nodes/voice/_shared.py, lazy-imported)
+#   transformers     - RVC HuBERT feature extractor (voice/rvc_wrapper.py)
+#   pyworld          - RVC F0 extraction (voice/rvc_wrapper.py)
+#   faiss            - RVC index search (voice/rvc_wrapper.py, lazy-imported)
+#   sounddevice      - realtime audio I/O (voice/realtime_stream.py — prototype, unregistered)
+[[tool.mypy.overrides]]
+module = [
+    "comfy",
+    "comfy.*",
+    "folder_paths",
+    "server",
+    "voxcpm",
+    "transformers",
+    "transformers.*",
+    "pyworld",
+    "faiss",
+    "sounddevice",
+]
+ignore_missing_imports = true
+
+# Genuinely-installed, always-auto-installed core audio deps (requirements.txt _AUTO_INSTALL
+# in __init__.py: librosa, soundfile, soxr, scipy) that simply ship no type stubs upstream —
+# a permanent, upstream-owned gap, not something this repo can fix. Silenced the same way as
+# the host-provided set above so G2's signal stays on THIS repo's own code, not third-party
+# stub gaps; librosa itself already ships py.typed and needs no override.
+[[tool.mypy.overrides]]
+module = ["soundfile", "soxr", "scipy", "scipy.*"]
+ignore_missing_imports = true
