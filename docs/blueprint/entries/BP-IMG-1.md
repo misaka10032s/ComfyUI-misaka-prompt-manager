@@ -38,7 +38,7 @@ tests:
     target: "nodes/image/factory/profile_factory.py › MisakaImageProfileFactory.execute() 的 save_as_profile 節點存檔路徑"
     action: "python tests/test_path_traversal.py（新增 test_node_save_traversal_rejected／test_node_save_normal_name_still_saves；透過 stub folder_paths/comfy.sd/comfy.utils 驅動 execute()，不需真實 ComfyUI 安裝）"
     expected: "跳出路徑（../escaped／..\\escaped／../../escaped）遭 resolve_profile_path() 拒絕、storage root 外無任何檔案落地；一般名稱（my_profile）仍正常存檔於 base/my_profile.json"
-    result: "PASS — 8/8（修復前先跑出 RED：test_node_save_traversal_rejected 因 '../escaped' 逃逸至 storage root 外而 FAIL，證明缺口存在；套用修復後全數 PASS，含既有 5 個測試）"
+    result: "PASS — 7/7（off-by-one 訂正 2026-09-05，CLAUDE.md:39 自身即載明 7 tests；修復前先跑出 RED：test_node_save_traversal_rejected 因 '../escaped' 逃逸至 storage root 外而 FAIL，證明缺口存在；套用修復後全數 PASS，含既有 5 個測試）"
     evidence: tests/test_path_traversal.py
     executor: implementer-subagent（BP-IMG-1 security fix，2026-07-22）
 ---
