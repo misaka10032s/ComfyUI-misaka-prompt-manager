@@ -7,6 +7,26 @@ Dependencies (all numpy 2.x compatible):
   torch / faiss-cpu         — bundled with ComfyUI
 
 HuBERT model is auto-downloaded from HuggingFace on first use.
+
+Concurrency note (待回答 #49 review F5, 2026-09-07, documentation only — no
+code change): `_install_rvc_finder()`/`_uninstall_rvc_finder()` and the
+`safe_globals(...)` allowlist window in `load_rvc_checkpoint()` assume
+checkpoints are loaded ONE AT A TIME on a single thread. Re-entrant/nested
+calls on the SAME thread are handled correctly (the inner call gets `False`
+from `_install_rvc_finder()` and leaves teardown to the outer call), but two
+threads calling `load_rvc_checkpoint()` concurrently are not: (1)
+`_uninstall_rvc_finder()` removes every `_RVCForkFinder` instance from
+`sys.meta_path`, not just the one the calling thread installed, so a thread
+that finishes first can uninstall the finder while another thread is still
+mid-unpickle; (2) `torch.serialization.safe_globals(...)` mutates a
+process-global unpickler state
+(`torch._weights_only_unpickler._marked_safe_globals_set`), so for the
+duration of that `with` block an unrelated concurrent
+`torch.load(weights_only=True)` elsewhere in the same ComfyUI process would
+transiently also accept this repo's allowlisted classes. Low impact in
+practice (every allowlisted class is inert — see the review's F6), but do
+not call `load_rvc_checkpoint()` from more than one thread at a time without
+addressing this.
 """
 
 import sys
@@ -17,6 +37,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from pathlib import Path
+
+from . import _safe_load
 
 _HUBERT_CACHE: dict = {}
 
@@ -107,13 +129,138 @@ _rvc_finder = _RVCForkFinder()
 
 
 def _install_rvc_finder():
-    if not any(isinstance(f, _RVCForkFinder) for f in sys.meta_path):
+    """Install the fork-package meta-path finder.
+
+    Returns True if THIS call added it to sys.meta_path (so the caller may
+    safely uninstall it once loading is done via `_uninstall_rvc_finder`);
+    False if a finder was already present (e.g. re-entrant/nested loads),
+    in which case the caller must leave it installed for whoever else needs it.
+    """
+    already_installed = any(isinstance(f, _RVCForkFinder) for f in sys.meta_path)
+    if not already_installed:
         sys.meta_path.insert(0, _rvc_finder)
     # Also pre-populate already-registered stubs (from a previous bad run)
     for key in list(sys.modules):
         root = key.split(".")[0]
         if root in _RVC_ROOTS:
             _rvc_finder._populate(sys.modules[key])
+    return not already_installed
+
+
+def _uninstall_rvc_finder():
+    """Remove the fork-package meta-path finder, shrinking its blast radius to
+    just the duration of one checkpoint load. Only meant to be called by the
+    same call site that got `True` back from `_install_rvc_finder()`."""
+    sys.meta_path[:] = [f for f in sys.meta_path if not isinstance(f, _RVCForkFinder)]
+
+
+class _StaticForkGlobalPlaceholder(str):
+    """
+    Inert placeholder bound to ONE specific, reviewed fork-package global for
+    the SAFE (weights_only=True) load path, via an explicit
+    `safe_globals([(_StaticForkGlobalPlaceholder, "dotted.path"), ...])` entry
+    — see `_rvc_safe_globals()`. Added 2026-09-07 (待回答 #49 review F2).
+
+    Unlike `_make_placeholder_class()`'s dynamic per-attribute-name stubs
+    (still used on the UNSAFE fallback path via `_RVCForkFinder`, for any
+    global NOT explicitly bound here), this is one fixed class statically
+    bound to one fixed, reviewed global name — a deliberate, one-at-a-time
+    decision, never a blanket stand-in for an entire fork namespace.
+
+    A plain `str` subclass: `__new__`/`__init__` absorb whatever positional
+    value the pickle stream's reconstruction opcode passes (the same
+    single-value-argument shape `_make_placeholder_class()` already proved
+    works for this exact global, see review F2's repro) and produce a
+    harmless string instance from it. No `__reduce__`, `__setstate__`, or
+    other side-effecting dunder is defined on purpose: this class is only
+    ever a reconstruction TARGET (unpickled INTO), never itself pickled OUT,
+    so those methods have no role here and adding them would only be an
+    unused side-effect surface.
+    """
+
+    def __new__(cls, value="", *args, **kwargs):
+        return str.__new__(cls, str(value))
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+# Fork-package globals reviewed and bound to an inert placeholder for the
+# SAFE load path (each entry is a deliberate, one-at-a-time decision — see
+# `_StaticForkGlobalPlaceholder`'s docstring). Add to this list ONLY after
+# confirming (like review F2 did) that the class carries no dangerous
+# `__init__`/`__new__`/`__setstate__` behaviour of its own — we never import
+# the real fork class to check this, because the whole point is to never
+# need it installed.
+_KNOWN_FORK_SAFE_GLOBALS = [
+    (_StaticForkGlobalPlaceholder, "ultimate_rvc.typing_extra.TrainingSampleRate"),
+]
+
+
+def _rvc_safe_globals():
+    """
+    Explicit allowlist for the safe (weights_only=True) checkpoint load path.
+    Two parts:
+
+    1. ALL `torch.nn.Module` subclasses defined in `voice/rvc_model.py` — code
+       we wrote and control in this repo, used to reconstruct the "full
+       pickled model object" checkpoint variant (`torch.save(model, path)`,
+       see `RVCConverter._load_model`'s `hasattr(cpt, "infer")` branch).
+       Allowing pickle to build instances of them only ever calls the plain
+       `nn.Module.__setstate__`/`__reduce_ex__` machinery with attributes
+       these classes' own `__init__` already produces — no arbitrary code
+       path.
+    2. `_KNOWN_FORK_SAFE_GLOBALS` — a short, explicitly reviewed list of
+       fork-package globals bound to this repo's own inert placeholder class
+       (see `_StaticForkGlobalPlaceholder`). Added 2026-09-07 (待回答 #49
+       review F2) after measuring that the owner's own `yuuka_best.pth`
+       needs exactly one such global
+       (`ultimate_rvc.typing_extra.TrainingSampleRate`) and that binding it
+       this way makes that file take the safe path with no warning, while
+       remaining deep-equal (keys, shapes, config) to the old unconditional
+       `weights_only=False` load.
+
+    Deliberately NOT allowlisted this way: any OTHER fork-package global.
+    `_make_placeholder_class()`'s dynamic per-attribute-name stubs (used only
+    on the UNSAFE fallback path, still reachable via `_RVCForkFinder`) remain
+    the catch-all for names not explicitly reviewed and bound here — a
+    checkpoint needing one of those will fail the safe path and fall back
+    (with a warning) instead of being blanket-trusted.
+    """
+    from . import rvc_model
+    return [
+        rvc_model.WN,
+        rvc_model.Flip,
+        rvc_model.ResidualCouplingLayer,
+        rvc_model.ResidualCouplingBlock,
+        rvc_model.LayerNorm,
+        rvc_model.MultiHeadAttention,
+        rvc_model.FFN,
+        rvc_model.Encoder,
+        rvc_model.TextEncoder256,
+        rvc_model.TextEncoder768,
+        rvc_model.SineGen,
+        rvc_model.SourceModuleHnNSF,
+        rvc_model.ResBlock1,
+        rvc_model.GeneratorNSF,
+        rvc_model.SynthesizerTrnMs256NSFsid,
+        rvc_model.SynthesizerTrnMs768NSFsid,
+    ] + _KNOWN_FORK_SAFE_GLOBALS
+
+
+def load_rvc_checkpoint(path: str):
+    """
+    Load an RVC `.pth` checkpoint via the safe-then-fallback loader
+    (`voice._safe_load.load_checkpoint`), with the fork-namespace finder
+    installed only for the duration of this one load (see
+    `_install_rvc_finder`/`_uninstall_rvc_finder`).
+    """
+    installed_here = _install_rvc_finder()
+    try:
+        return _safe_load.load_checkpoint(path, safe_globals=_rvc_safe_globals())
+    finally:
+        if installed_here:
+            _uninstall_rvc_finder()
 
 
 # ---------------------------------------------------------------------------
@@ -363,10 +510,8 @@ class RVCConverter:
         self._load_model()
 
     def _load_model(self):
-        _install_rvc_finder()
-
         try:
-            cpt = torch.load(self.model_path, map_location="cpu", weights_only=False)
+            cpt = load_rvc_checkpoint(self.model_path)
         except Exception as e:
             raise RuntimeError(f"[MisakaVC] Cannot open model file: {e}") from e
 
