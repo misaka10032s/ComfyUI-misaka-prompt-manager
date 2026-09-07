@@ -149,4 +149,6 @@ and mypy 1.20.2 are already present there.
 - Realtime streaming nodes (`voice/realtime_stream.py`) are NOT registered in `__init__.py`
   — blueprint/prototype only; do not delete without checking the roadmap task first.
 - `convert_workflows.py`: standalone migration tool (no ComfyUI dependency at import).
-- Open security task: `get_project` path-traversal on `project_id` — tracked in registry.
+- Same-origin guard + request-body size cap for `/misaka/*` write routes:
+  `nodes/image/factory/_origin_guard.py` (see `docs/blueprint/entries/BP-IMG-1.md` qa_log,
+  2026-09-07). No open security task tracked in the registry at this time.

@@ -33,7 +33,15 @@ _ensure_packages()
 
 from .nodes.image import NODE_CLASS_MAPPINGS as _IMAGE_NODES
 from .nodes.image import NODE_DISPLAY_NAME_MAPPINGS as _IMAGE_NAMES
-from .nodes.image.factory import get_storage_path, resolve_profile_path
+from .nodes.image.factory import (
+    get_storage_path,
+    resolve_profile_path,
+    MAX_PROFILE_BODY_BYTES,
+    BodyTooLarge,
+    guard_same_origin,
+    read_capped_body,
+    content_length_exceeds_cap,
+)
 
 try:
     from .nodes.voice import NODE_CLASS_MAPPINGS as _VOICE_NODES
@@ -50,6 +58,21 @@ from server import PromptServer
 from aiohttp import web
 import os
 import json
+
+
+def _get_server_port():
+    """Best-effort lookup of the port ComfyUI is actually bound to, used by
+    the same-origin guard's DNS-rebinding check (_origin_guard.py). Falls back
+    to None (guard logs a WARNING and skips that sub-check) rather than
+    guessing — a wrong guessed port would be worse than skipping the check."""
+    port = getattr(PromptServer.instance, "port", None)
+    if port is not None:
+        return port
+    try:
+        import comfy.cli_args
+        return getattr(comfy.cli_args.args, "port", None)
+    except Exception:
+        return None
 
 
 @PromptServer.instance.routes.get("/misaka/profile_list")
@@ -90,13 +113,39 @@ async def load_profile(request):
 
 @PromptServer.instance.routes.post("/misaka/save_profile")
 async def save_profile(request):
+    guard_response = await guard_same_origin(request, _get_server_port())
+    if guard_response is not None:
+        return guard_response
+
+    if content_length_exceeds_cap(request.content_length):
+        return web.json_response(
+            {"error": f"請求主體過大（上限 {MAX_PROFILE_BODY_BYTES} bytes）"}, status=413
+        )
+
     try:
-        data = await request.json()
+        try:
+            raw_body = await read_capped_body(request, MAX_PROFILE_BODY_BYTES)
+        except BodyTooLarge:
+            return web.json_response(
+                {"error": f"請求主體過大（上限 {MAX_PROFILE_BODY_BYTES} bytes）"}, status=413
+            )
+
+        try:
+            data = json.loads(raw_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            return web.Response(status=400, text=f"Invalid JSON body: {e}")
+
         filename = data.get("filename")
         profile_data = data.get("data")
 
         if not filename or not profile_data:
             return web.Response(status=400, text="Missing filename or data")
+
+        serialized_size = len(json.dumps(profile_data, ensure_ascii=False).encode("utf-8"))
+        if serialized_size > MAX_PROFILE_BODY_BYTES:
+            return web.json_response(
+                {"error": f"profile 資料過大（上限 {MAX_PROFILE_BODY_BYTES} bytes）"}, status=413
+            )
 
         base = get_storage_path()
 
