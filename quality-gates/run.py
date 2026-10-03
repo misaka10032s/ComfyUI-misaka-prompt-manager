@@ -79,7 +79,11 @@ def g3() -> int:
         return rc
     # Assertion-presence scans the *diff*, so it needs the real repo root as cwd (git_diff's
     # get_changed_files/get_changed_line_ranges resolve paths relative to cwd).
-    return _run([sys.executable, str(GATES_DIR / "check_test_assertions.py")], ROOT)
+    rc = _run([sys.executable, str(GATES_DIR / "check_test_assertions.py")], ROOT)
+    if rc != 0:
+        return rc
+    # Determinism (G3c) scans the WHOLE test scope on every run, never the diff, so cwd is the repo root.
+    return _run([sys.executable, str(GATES_DIR / "check_test_determinism.py")], ROOT)
 
 
 def l0(update_baseline: bool = False) -> int:

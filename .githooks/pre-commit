@@ -14,7 +14,8 @@ set -e
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-staged_py=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+# pyproject.toml / pytest.ini hold the pytest config that G3(c) (determinism) scans; the canary folder and this hook are scanned or guarded by it too.
+staged_py=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py' 'pyproject.toml' 'pytest.ini' 'quality-gates/determinism-canaries' '.githooks/pre-commit')
 
 if [ -n "$staged_py" ]; then
   checked_count=$(printf '%s\n' "$staged_py" | grep -c .)
