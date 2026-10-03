@@ -45,7 +45,7 @@ py -3.11 quality-gates/run.py g1 --update-baseline   # deliberate cleanup / acce
 py -3.11 quality-gates/run.py g2 --update-baseline
 ```
 
-Always use `py -3.11` (global CLAUDE.md `## Python launch (this Windows machine — read before any python command)`), and **never the portable ComfyUI install's own bundled Python** — the gates run in a standalone interpreter deliberately, so mypy/ruff analyze this repo's code without the live ComfyUI host's own config or deps leaking in.
+Always use `py -3.11` (the global CLAUDE.md Python line), and **never the portable ComfyUI install's own bundled Python** — the gates run in a standalone interpreter deliberately, so mypy/ruff analyze this repo's code without the live ComfyUI host's own config or deps leaking in.
 
 The pre-commit hook wires `l0` into `git commit` automatically for any commit that stages `.py` files — activation and its per-clone caveat: `**Hook:**` under `## Code quality gates` below.
 
