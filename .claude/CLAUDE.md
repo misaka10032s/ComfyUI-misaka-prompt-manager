@@ -26,7 +26,7 @@ No separate dev server.
 
 FFmpeg shared DLLs required on Windows for VoxCPM (not pip-installable).
 
-**Tests:** `tests/test_path_traversal.py` (7 tests, covers the profile path-traversal security fix).
+**Tests:** the test files are in `tests/` (the folder is the list; no count is kept here).
 
 **Do NOT run plain `pytest tests/` from the repo root** — this repo lives inside a portable ComfyUI installation whose `pytest.ini` and package layout make that invocation try to import this plugin's real `__init__.py` (pulling in the live ComfyUI host) and fail.
 
@@ -40,7 +40,8 @@ Use the exact invocation in `## Dev commands` below, or `quality-gates/run.py g3
 py -3.11 quality-gates/run.py l0              # G1 lint + G2 typecheck + G3 tests, from repo root
 py -3.11 quality-gates/run.py g1               # ruff lint only (baselined)
 py -3.11 quality-gates/run.py g2               # mypy typecheck only (baselined)
-py -3.11 quality-gates/run.py g3               # pytest (7 tests) + assertion-presence on new tests
+py -3.11 quality-gates/run.py g3               # pytest (whole `tests/`) + assertion-presence on new tests + determinism scan
+py -3.11 quality-gates/run.py commit           # what the pre-commit hook runs: staged-file ruff, determinism, assertions, related tests
 py -3.11 quality-gates/run.py g1 --update-baseline   # deliberate cleanup / accepted new debt only
 py -3.11 quality-gates/run.py g2 --update-baseline
 ```
@@ -53,9 +54,9 @@ The pre-commit hook wires `l0` into `git commit` automatically for any commit th
 
 **L0 only — deliberately, not a partial rollout.**
 
-This repo carries exactly ONE test file (`tests/test_path_traversal.py`, 7 tests).
+This repo's test suite is small (the files in `tests/`; no count is kept here).
 
-Diff coverage (L1) and mutation testing (L2) are theatre, not signal, at that test count — there is nothing for a coverage/mutation gate to meaningfully measure against.
+Diff coverage (L1) and mutation testing (L2) are theatre, not signal, at that size — there is nothing for a coverage/mutation gate to meaningfully measure against.
 
 If the test suite grows substantially, re-evaluate L1 as a separate, deliberate decision — do not silently expand this recipe.
 
@@ -67,8 +68,9 @@ If the test suite grows substantially, re-evaluate L1 as a separate, deliberate 
   - Host-provided modules injected by the ComfyUI runtime — never resolvable in a bare interpreter — are `ignore_missing_imports`, not baselined: `comfy`/`comfy.*`, `folder_paths`, `server`.
   - Optional manual-install RVC/TTS deps get the same treatment: `voxcpm`, `transformers`, `pyworld`, `faiss`, `sounddevice`.
   - Always-auto-installed core audio deps that simply ship no type stubs upstream (`soundfile`, `soxr`, `scipy`) are silenced the same way — see `pyproject.toml` -> `[[tool.mypy.overrides]]` for the exact, documented list.
-- **G3 — pytest green + G3b assertion-presence on new/changed tests** (`quality-gates/check_test_assertions.py`, diff-scoped AST walk — bolting a zero-assertion check onto the WHOLE repo would also flag any pre-existing offenders, a different problem).
-- **`l0` runner** (`quality-gates/run.py`) sequences G1 → G2 → G3, stops on first failure.
+- **G3 — pytest green + G3b assertion-presence on new/changed tests** (`quality-gates/check_test_assertions.py`, diff-scoped AST walk — bolting a zero-assertion check onto the WHOLE repo would also flag any pre-existing offenders, a different problem) **+ G3c determinism scan** (`quality-gates/check_test_determinism.py`: no test-writing pattern whose result can differ between runs; the runtime write guard is `tests/conftest.py`).
+- **`commit` level** (`quality-gates/run.py commit`, called by `.githooks/pre-commit`): at commit only ruff on the staged .py files, the determinism scan, the assertion check on the staged test files and pytest on the related test files (`quality-gates/related_tests.py`), within about 10 seconds.
+- **`l0` runner** (`quality-gates/run.py`) sequences G1 → G2 → G3 (whole-tree ruff, mypy, whole pytest suite) and runs once at the end of the task, before merge, not at commit; stops on first failure.
 
 **Baselines (version-controlled, by exact identity — never a bare count):** `quality-gates/ruff-baseline.json` (24 unique pre-existing violations; 39 raw findings before dedup — several files repeat the identical file+code+message, e.g. `__init__.py`'s 7× `E402`, `voice/rvc_model.py`'s 5× `E741 Ambiguous variable name: l`), `quality-gates/ mypy-baseline.json` (23 unique pre-existing errors; 24 raw before dedup).
 

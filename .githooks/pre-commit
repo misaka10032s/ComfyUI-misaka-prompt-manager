@@ -1,6 +1,8 @@
 #!/bin/sh
-# L0 quality gate (G1 lint, G2 typecheck, G3 tests+assertions) — runs only when the commit
-# stages Python files. Enable once per clone/machine:
+# Commit-level quality gate (`run.py commit`: ruff on the staged .py files, the determinism scan, the assertion check
+# on the staged test files, and pytest on the related test files only — within about 10 seconds). The full level
+# (`run.py l0`: whole-tree ruff + mypy + the whole pytest suite) runs once at the end of the task, before merge, not
+# here. Runs when the commit stages a Python file or any other path the checks read. Enable once per clone/machine:
 #   git config core.hooksPath .githooks
 # (core.hooksPath is local, per-clone config — it does NOT travel with the repo, so a fresh
 # clone or a new machine has this hook silently absent until the command above is run again.)
@@ -14,20 +16,21 @@ set -e
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-# pyproject.toml / pytest.ini hold the pytest config that G3(c) (determinism) scans; the canary folder and this hook are scanned or guarded by it too.
-staged_py=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py' 'pyproject.toml' 'pytest.ini' 'quality-gates/determinism-canaries' '.githooks/pre-commit')
+# G3(c) (determinism) also scans pyproject.toml / pytest.ini (pytest config) and requirements*.txt (dependency pins),
+# and guards every file under a quality-gates/ folder (checkers, their canaries) and this hook itself.
+staged_py=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py' 'pyproject.toml' 'pytest.ini' '*requirements*.txt' '*quality-gates/*' 'quality-gates/determinism-canaries' '.githooks/pre-commit')
 
 if [ -n "$staged_py" ]; then
   checked_count=$(printf '%s\n' "$staged_py" | grep -c .)
-  echo "[pre-commit] $checked_count staged .py file(s) — running quality-gates l0 (G1 lint, G2 typecheck, G3 tests+assertions)..."
-  if ! py -3.11 quality-gates/run.py l0; then
-    echo "[pre-commit] checked: $checked_count staged .py file(s) | skipped: 0 (l0 gate) — FAILED, commit blocked."
+  echo "[pre-commit] $checked_count staged file(s) — running quality-gates commit (staged-file lint, determinism, assertions, related tests)..."
+  if ! py -3.11 quality-gates/run.py commit; then
+    echo "[pre-commit] checked: $checked_count staged file(s) | skipped: 0 (commit gate) — FAILED, commit blocked."
     echo "[pre-commit] fix the above and retry, or --no-verify to bypass (discouraged, logged as a rule violation)."
     exit 1
   fi
-  echo "[pre-commit] checked: $checked_count staged .py file(s) | skipped: 0 (l0 gate) — PASSED."
+  echo "[pre-commit] checked: $checked_count staged file(s) | skipped: 0 (commit gate) — PASSED."
 else
-  echo "[pre-commit] checked: 0 staged .py file(s) | skipped: l0 gate (no Python files staged)."
+  echo "[pre-commit] checked: 0 staged file(s) | skipped: commit gate (no checked file staged)."
 fi
 
 exit 0
