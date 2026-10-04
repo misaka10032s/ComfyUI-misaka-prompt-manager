@@ -1,8 +1,9 @@
 #!/bin/sh
-# Commit-level quality gate (`run.py commit`: ruff on the staged .py files, the determinism scan, the assertion check
+# Commit-level quality gate (`run.py commit`: it classes the staged files by path and runs only the steps that class
+# needs — ruff on the staged .py files, the determinism scan of the staged test/setup/gate files, the assertion check
 # on the staged test files, and pytest on the related test files only — within about 10 seconds). The full level
 # (`run.py l0`: whole-tree ruff + mypy + the whole pytest suite) runs once at the end of the task, before merge, not
-# here. Runs when the commit stages a Python file or any other path the checks read. Enable once per clone/machine:
+# here. Runs when the commit stages (or deletes or renames) a Python file or any other path the checks read. Enable once per clone/machine:
 #   git config core.hooksPath .githooks
 # (core.hooksPath is local, per-clone config — it does NOT travel with the repo, so a fresh
 # clone or a new machine has this hook silently absent until the command above is run again.)
@@ -16,9 +17,10 @@ set -e
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
+# A staged delete (D) or rename (R) of a code or test file is test setup: `run.py commit` then runs no tests.
 # G3(c) (determinism) also scans pyproject.toml / pytest.ini (pytest config) and requirements*.txt (dependency pins),
 # and guards every file under a quality-gates/ folder (checkers, their canaries) and this hook itself.
-staged_py=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py' 'pyproject.toml' 'pytest.ini' '*requirements*.txt' '*quality-gates/*' 'quality-gates/determinism-canaries' '.githooks/pre-commit')
+staged_py=$(git diff --cached --name-only --diff-filter=ACMRD -- '*.py' 'pyproject.toml' 'pytest.ini' '*requirements*.txt' '*quality-gates/*' 'quality-gates/determinism-canaries' '.githooks/pre-commit')
 
 if [ -n "$staged_py" ]; then
   checked_count=$(printf '%s\n' "$staged_py" | grep -c .)

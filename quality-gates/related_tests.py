@@ -10,8 +10,11 @@ file they stand. A staged module is named by its dotted path from the repo root 
 `voice._safe_load`, `voice/__init__.py` is `voice` and also covers every `voice.*` import) and, when its folder has
 no `__init__.py`, by its bare file name (which pytest puts on the path for the tests beside it).
 
-A test file that holds a staged module's dotted path as a string (`import_module("a.b")`) or a staged file's 
-repo-relative path (with `/` or a backslash, as in `spec_from_file_location`) is related, the same as an import.
+More links: a test file that names a staged file as a string counts like an import: a module's dotted path in quotes
+(`import_module("voice._safe_load")`), the file's path with a slash or a backslash (`spec_from_file_location(...,
+"voice/_safe_load.py")`), or the file's base name in quotes (`"_safe_load.py"`, which a test that joins path parts holds
+instead of the full path). Staged files of every extension take part in the two path rules, not only `.py`;
+`__init__.py` and `conftest.py` never count by base name.
 
 Usage (from the repo root):  py -3.11 quality-gates/related_tests.py   (prints the files, one per line)
 """
@@ -19,13 +22,13 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.git_diff import ensure_utf8_stdio, get_staged_files
 
-BACKSLASH = chr(92)
 ROOT = Path(__file__).resolve().parent.parent  # repo root
 TEST_PATHS = ["tests"]
 PYTHON_FILES = ["test_*.py", "*_test.py"]
@@ -68,33 +71,24 @@ def imported_names(path: Path) -> set[str]:
     return names
 
 
-def dotted_module_name(rel: str) -> str | None:
-    """The dotted path a string can load a module by (`a/b/c.py` is `a.b.c`, `a/b/__init__.py` is `a.b`), or None."""
-    parts = rel[: -len(".py")].split("/")
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
-    if parts and all(part.isidentifier() for part in parts):
-        return ".".join(parts)
-    return None
-
-
-def loaded_by_string(path: Path, dotted: set[str], dotted_packages: set[str], file_paths: set[str]) -> bool:
-    """True when the file holds a staged module's dotted path as a string literal (`import_module("a.b")`), or a
-    staged file's repo-relative path anywhere in its text (`spec_from_file_location(..., "a/b.py")`)."""
-    text = path.read_text(encoding="utf-8")
-    if any(file_path in text for file_path in file_paths):
-        return True
-    for node in ast.walk(ast.parse(text, filename=str(path))):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            value = node.value
-            if value in dotted or any(value.startswith(package + ".") for package in dotted_packages):
-                return True
-    return False
+def string_reference_pattern(names: set[str], staged: list[str]) -> re.Pattern[str] | None:
+    """Matches a quoted dotted module path (`"pkg.mod"`, `"pkg.mod.attr"`), a staged file's path, or a staged file's
+    base name in quotes (`"_safe_load.py"`; never for `__init__.py` or `conftest.py`)."""
+    alternatives: list[str] = []
+    if names:
+        alternatives.append("[\"'](?:" + "|".join(re.escape(name) for name in sorted(names)) + ")[\"'.]")
+    for rel in staged:
+        alternatives.append(r"[/\\]+".join(re.escape(part) for part in rel.split("/")))
+    base_names = {Path(rel).name for rel in staged} - {"__init__.py", "conftest.py"}
+    if base_names:
+        alternatives.append("[\"'](?:" + "|".join(re.escape(name) for name in sorted(base_names)) + ")[\"']")
+    return re.compile("|".join(alternatives)) if alternatives else None
 
 
 def related_test_files(root: Path = ROOT) -> list[str]:
-    """Staged test files plus the test files that import a staged module, relative to `root`, sorted."""
-    staged = get_staged_files(root, ["py"])
+    """Staged test files, the tests under a staged conftest.py, and the test files that import a staged module or
+    name a staged file as a string (dotted path, file path or quoted base name), relative to `root`, sorted."""
+    staged = get_staged_files(root, ["*"])  # the pathspec `*.*`: staged files of every extension
     tests = all_test_files(root)
     related = {rel for rel in staged if rel in tests}
     for rel in staged:
@@ -103,31 +97,24 @@ def related_test_files(root: Path = ROOT) -> list[str]:
             related |= {test for test in tests if test.startswith(folder)}
     exact: set[str] = set()
     packages: set[str] = set()
-    dotted: set[str] = set()  # the dotted paths a string can load a staged module by
-    dotted_packages: set[str] = set()
-    file_paths: set[str] = set()  # the staged files' repo-relative paths, with / and with a backslash
     for rel in staged:
+        if not rel.endswith(".py"):
+            continue
         names, is_package = module_names(root, rel)
         exact |= names
         if is_package:
             packages |= names
-        dotted_name = dotted_module_name(rel)
-        if dotted_name:
-            dotted.add(dotted_name)
-            if is_package:
-                dotted_packages.add(dotted_name)
-        file_paths |= {rel, rel.replace("/", BACKSLASH), rel.replace("/", BACKSLASH * 2)}
-    if exact or file_paths:
+    by_string = string_reference_pattern(exact, staged)
+    if by_string:
         for rel in tests:
             if rel in related:
                 continue
-            for name in imported_names(root / rel):
-                if name in exact or any(name.startswith(package + ".") for package in packages):
-                    related.add(rel)
-                    break
-            else:
-                if loaded_by_string(root / rel, dotted, dotted_packages, file_paths):
-                    related.add(rel)
+            imports_staged = bool(exact) and any(
+                name in exact or any(name.startswith(package + ".") for package in packages)
+                for name in imported_names(root / rel)
+            )
+            if imports_staged or by_string.search((root / rel).read_text(encoding="utf-8")):
+                related.add(rel)
     return sorted(related)
 
 
