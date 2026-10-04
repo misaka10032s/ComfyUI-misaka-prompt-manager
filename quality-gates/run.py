@@ -83,7 +83,7 @@ CLASS_ORDER = ("code", "test", "setup", "tooling", "docs", "style", "wording")
 
 
 def _run(cmd: list[str], cwd: Path) -> int:
-    print(f"$ {' '.join(cmd)}  (cwd={cwd})")
+    print(f"$ {' '.join(cmd)}  (cwd={cwd})", flush=True)
     return subprocess.run(cmd, cwd=cwd).returncode
 
 
@@ -190,9 +190,13 @@ def commit() -> int:
             return rc
     if not TESTS_AT_COMMIT:
         return 0
-    setup_files = [rel for _, rel, cls in entries if cls == "setup"]
-    if setup_files:
-        print(f"[commit] {setup_files[0]} is test setup: the tests move to the end-of-task run", flush=True)
+    setup_entries = [(status, rel) for status, rel, cls in entries if cls == "setup"]
+    if setup_entries:
+        status, rel = setup_entries[0]
+        if status in ("D", "R"):
+            print(f"[commit] {rel} was deleted or renamed: the tests move to the end-of-task run", flush=True)
+        else:
+            print(f"[commit] {rel} is test setup: the tests move to the end-of-task run", flush=True)
         return 0
     related = related_test_files(ROOT)
     if not related:
