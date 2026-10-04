@@ -12,9 +12,9 @@ Usage (from the repo root):
   l0 = G1 (ruff lint, baselined) + G2 (mypy typecheck, baselined) + G3 (pytest green +
        assertion-presence on new/changed tests) — seconds-level.
 
-**Why L0 only, no L1/L2:** this repo carries exactly ONE test file (`tests/test_path_traversal.py`,
-7 tests). Diff coverage (L1) and mutation testing (L2) are theatre, not signal, at that test
-count — there is nothing for a coverage/mutation gate to meaningfully measure against. This
+**Why L0 only, no L1/L2:** this repo's tests are the files under `tests/`.
+Diff coverage (L1) and mutation testing (L2) are theatre, not signal, at that test
+size — there is nothing for a coverage/mutation gate to meaningfully measure against. This
 scope decision was made before this recipe was installed (see `.claude/CLAUDE.md` ->
 `## Code quality gates`) and is not to be silently expanded.
 
