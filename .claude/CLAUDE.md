@@ -18,7 +18,7 @@ _(none yet — add files here per @PM taxonomy)_
 
 **Dependencies:** `requirements.txt` — core audio pipeline (librosa, soundfile, soxr, scipy) auto-installs on first load; RVC inference (pyworld, torchcrepe, faiss) and VoxCPM TTS are optional and must be installed manually (see file for instructions); FFmpeg shared DLLs are required on Windows for VoxCPM (not pip-installable).
 
-**Tests:** `tests/test_path_traversal.py` (7 tests, covers the profile path-traversal security fix); **do NOT run plain `pytest tests/` from the repo root** — this repo lives inside a portable ComfyUI installation whose `pytest.ini` and package layout make that invocation try to import this plugin's real `__init__.py` (pulling in the live ComfyUI host) and fail; use the exact invocation in `## Dev commands` below, or `quality-gates/run.py g3`.
+**Tests:** the test files are in `tests/` (the folder is the list; no count is kept here); **do NOT run plain `pytest tests/` from the repo root** — this repo lives inside a portable ComfyUI installation whose `pytest.ini` and package layout make that invocation try to import this plugin's real `__init__.py` (pulling in the live ComfyUI host) and fail; use the exact invocation in `## Dev commands` below, or `quality-gates/run.py g3`.
 
 **Reload after code changes:** restart ComfyUI or use ComfyUI-Manager → Reload.
 
@@ -28,7 +28,8 @@ _(none yet — add files here per @PM taxonomy)_
 py -3.11 quality-gates/run.py l0              # G1 lint + G2 typecheck + G3 tests, from repo root
 py -3.11 quality-gates/run.py g1               # ruff lint only (baselined)
 py -3.11 quality-gates/run.py g2               # mypy typecheck only (baselined)
-py -3.11 quality-gates/run.py g3               # pytest (7 tests) + assertion-presence on new tests
+py -3.11 quality-gates/run.py g3               # pytest (whole `tests/`) + assertion-presence on new tests + determinism scan
+py -3.11 quality-gates/run.py commit           # what the pre-commit hook runs: staged-file ruff, determinism, assertions, related tests
 py -3.11 quality-gates/run.py g1 --update-baseline   # deliberate cleanup / accepted new debt only
 py -3.11 quality-gates/run.py g2 --update-baseline
 ```
@@ -39,13 +40,14 @@ The pre-commit hook wires `l0` into `git commit` automatically for any commit th
 
 ## Code quality gates
 
-**L0 only (the seconds-scale pre-commit checks: lint, typecheck, tests) — deliberately, not a partial rollout.** This repo carries exactly ONE test file (`tests/test_path_traversal.py`, 7 tests), so diff coverage (L1) and mutation testing (L2) are theatre, not signal, at that test count — there is nothing for a coverage/mutation gate to meaningfully measure against; if the test suite grows substantially, re-evaluate L1 (diff coverage) as a separate, deliberate decision — do not silently expand this recipe.
+**L0 only (the seconds-scale pre-commit checks: lint, typecheck, tests) — deliberately, not a partial rollout.** This repo's test suite is small (the files in `tests/`; no count is kept here), so diff coverage (L1) and mutation testing (L2) are theatre, not signal, at that size — there is nothing for a coverage/mutation gate to meaningfully measure against; if the test suite grows substantially, re-evaluate L1 (diff coverage) as a separate, deliberate decision — do not silently expand this recipe.
 
 **Gates shipped:**
 - **G1 — ruff lint, baselined** (`quality-gates/check_ruff_baseline.py`): the rule set is ruff's own stable defaults, stated explicitly (`[tool.ruff.lint] select = ["E4","E7","E9","F"]` in `pyproject.toml`) — deliberately NOT the ComfyUI host's own `pyproject.toml` (which enables `T20`/`W29x` and produces 84 findings, mostly `print`-found noise from this plugin's normal console-feedback style); ruff stops its upward config search at the first `pyproject.toml` it finds, so this repo's own file (committed at repo root) always wins over the host's, in the main tree or any worktree.
 - **G2 — mypy typecheck, baselined** (`quality-gates/check_mypy_baseline.py`): host-provided modules injected by the ComfyUI runtime — never resolvable in a bare interpreter — are `ignore_missing_imports`, not baselined: `comfy`/`comfy.*`, `folder_paths`, `server`; optional manual-install RVC/TTS deps get the same treatment: `voxcpm`, `transformers`, `pyworld`, `faiss`, `sounddevice`; always-auto-installed core audio deps that simply ship no type stubs upstream (`soundfile`, `soxr`, `scipy`) are silenced the same way — see `pyproject.toml` -> `[[tool.mypy.overrides]]` for the exact, documented list.
-- **G3 — pytest green + G3b assertion-presence on new/changed tests** (`quality-gates/check_test_assertions.py`, diff-scoped AST walk — bolting a zero-assertion check onto the WHOLE repo would also flag any pre-existing offenders, a different problem).
-- **`l0` runner** (`quality-gates/run.py`) sequences G1 lint → G2 typecheck → G3 tests, stops on first failure.
+- **G3 — pytest green + G3b assertion-presence on new/changed tests** (`quality-gates/check_test_assertions.py`, diff-scoped AST walk — bolting a zero-assertion check onto the WHOLE repo would also flag any pre-existing offenders, a different problem) **+ G3c determinism scan** (`quality-gates/check_test_determinism.py`: no test-writing pattern whose result can differ between runs; the runtime write guard is `tests/conftest.py`).
+- **`commit` level** (`quality-gates/run.py commit`, called by `.githooks/pre-commit`): at commit only ruff on the staged .py files, the determinism scan, the assertion check on the staged test files and pytest on the related test files (`quality-gates/related_tests.py`), within about 10 seconds.
+- **`l0` runner** (`quality-gates/run.py`) sequences G1 → G2 → G3 (whole-tree ruff, mypy, whole pytest suite) and runs once at the end of the task, before merge, not at commit; stops on first failure.
 
 **Baselines (version-controlled, by exact identity — never a bare count):** `quality-gates/ruff-baseline.json` (24 unique pre-existing violations; 39 raw findings before dedup — several files repeat the identical file+code+message, e.g. `__init__.py`'s 7× `E402`, `voice/rvc_model.py`'s 5× `E741 Ambiguous variable name: l`), `quality-gates/ mypy-baseline.json` (23 unique pre-existing errors; 24 raw before dedup); this gate does NOT fix either backlog, it only stops NEW findings from landing, and `--update-baseline` is for a deliberate, reviewed cleanup or knowingly accepted new debt, never a blanket bypass; three of the 23 mypy baseline entries (`__init__.py|import-not-found|...__main__.nodes.*`) are a structural artifact of checking this plugin's entrypoint `__init__.py` outside the real `custom_nodes` package context ComfyUI's own loader gives it at runtime (its relative imports resolve fine there) — not a real bug in the file; baselined like everything else rather than engineered around.
 

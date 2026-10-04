@@ -1,16 +1,9 @@
 """
 Real-torch tests for the RVC safe-load decision logic (voice/_safe_load.py).
 
-This plugin's own quality-gate interpreter (py -3.11) is NOT guaranteed to
-have torch installed — `pytest.importorskip("torch")` below makes the WHOLE
-FILE skip cleanly on an interpreter without it, instead of failing
-collection. (待回答 #49 review F4: measured 2026-09-07, THIS machine's py
--3.11 actually does have torch 2.11.0+cu128, same as the embedded
-interpreter — so on this machine the gate run below already exercises this
-file for real, not just via the torch-free `test_rvc_safe_load.py`. That is
-this machine's install state, not a property of the gate interpreter this
-repo targets; do not assume the next machine's py -3.11 has torch.) Run it
-for real with the ComfyUI EMBEDDED interpreter, which does have torch:
+This file imports torch directly: on an interpreter without torch it fails
+loudly at collection instead of vanishing from the run. Run it with an
+interpreter that has torch, e.g. the ComfyUI EMBEDDED interpreter:
 
     D:/AIprojects/ComfyUI_windows_portable/python_embeded/python.exe -m pytest -q \
         test_rvc_safe_load_torch.py
@@ -21,8 +14,7 @@ import logging
 import os
 
 import pytest
-
-torch = pytest.importorskip("torch")
+import torch
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _MODULE_FILE = os.path.join(_HERE, "..", "voice", "_safe_load.py")
@@ -53,8 +45,8 @@ def test_synthetic_rvc_checkpoint_loads_via_safe_path(safe_load, ckpt_path, capl
     (weights_only=True) attempt, with no fallback warning."""
     checkpoint = {
         "weight": {
-            "enc_p.emb_phone.weight": torch.randn(4, 8),
-            "dec.conv_pre.weight": torch.randn(2, 2, 3),
+            "enc_p.emb_phone.weight": torch.arange(32, dtype=torch.float32).reshape(4, 8),
+            "dec.conv_pre.weight": torch.arange(12, dtype=torch.float32).reshape(2, 2, 3),
         },
         "config": [1, 2, 3, 192, 4],
         "version": "v2",
@@ -121,7 +113,7 @@ def test_strict_mode_raises_instead_of_falling_back(safe_load, ckpt_path, monkey
 def test_truncated_checkpoint_raises_without_fallback_or_warning(
     safe_load, ckpt_path, caplog, capsys
 ):
-    checkpoint = {"weight": {"a": torch.randn(2, 2)}, "config": [1], "version": "v2"}
+    checkpoint = {"weight": {"a": torch.arange(4, dtype=torch.float32).reshape(2, 2)}, "config": [1], "version": "v2"}
     torch.save(checkpoint, ckpt_path)
     full_bytes = open(ckpt_path, "rb").read()
     with open(ckpt_path, "wb") as f:

@@ -2,14 +2,19 @@
 """Aggregate quality-gate runner — L0 ONLY (deliberate scope decision, not a partial rollout).
 
 Usage (from the repo root):
-    py -3.11 quality-gates/run.py <g1|g2|g3|l0> [--update-baseline]
+    py -3.11 quality-gates/run.py <g1|g2|g3|commit|l0> [--update-baseline]
 
+  commit = the fast steps the pre-commit hook runs, within about 10 seconds: ruff on the STAGED .py files only (no
+       mypy), the determinism scan, the assertion check on the staged test files, and pytest on the RELATED test files
+       only (`related_tests.py`: the staged test files, the test files that import a staged module, and every test
+       file under a staged `conftest.py`'s folder; none -> it says so and passes). Whole-suite pytest and mypy stay in
+       l0, the end-of-task run.
   l0 = G1 (ruff lint, baselined) + G2 (mypy typecheck, baselined) + G3 (pytest green +
        assertion-presence on new/changed tests) — seconds-level.
 
-**Why L0 only, no L1/L2:** this repo carries exactly ONE test file (`tests/test_path_traversal.py`,
-7 tests). Diff coverage (L1) and mutation testing (L2) are theatre, not signal, at that test
-count — there is nothing for a coverage/mutation gate to meaningfully measure against. This
+**Why L0 only, no L1/L2:** this repo's tests are the files under `tests/`.
+Diff coverage (L1) and mutation testing (L2) are theatre, not signal, at that test
+size — there is nothing for a coverage/mutation gate to meaningfully measure against. This
 scope decision was made before this recipe was installed (see `.claude/CLAUDE.md` ->
 `## Code quality gates`) and is not to be silently expanded.
 
@@ -41,6 +46,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.git_diff import ensure_utf8_stdio
+from related_tests import related_test_files
 
 ensure_utf8_stdio()
 
@@ -79,7 +85,32 @@ def g3() -> int:
         return rc
     # Assertion-presence scans the *diff*, so it needs the real repo root as cwd (git_diff's
     # get_changed_files/get_changed_line_ranges resolve paths relative to cwd).
-    return _run([sys.executable, str(GATES_DIR / "check_test_assertions.py")], ROOT)
+    rc = _run([sys.executable, str(GATES_DIR / "check_test_assertions.py")], ROOT)
+    if rc != 0:
+        return rc
+    # Determinism (G3c) scans the WHOLE test scope on every run, never the diff, so cwd is the repo root.
+    return _run([sys.executable, str(GATES_DIR / "check_test_determinism.py")], ROOT)
+
+
+def commit() -> int:
+    """The pre-commit level: staged-file ruff, the determinism scan, the assertion check on staged test files, and the
+    related tests (see the module docstring). l0 stays the end-of-task run. pytest runs with the same cwd and
+    --rootdir/--confcutdir as g3 (see the module docstring), on the related test files by absolute path."""
+    rc = _run([sys.executable, str(GATES_DIR / "check_ruff_baseline.py"), "--staged"], ROOT)
+    if rc != 0:
+        return rc
+    rc = _run([sys.executable, str(GATES_DIR / "check_test_determinism.py")], ROOT)
+    if rc != 0:
+        return rc
+    rc = _run([sys.executable, str(GATES_DIR / "check_test_assertions.py"), "--staged"], ROOT)
+    if rc != 0:
+        return rc
+    related = related_test_files(ROOT)
+    if not related:
+        print("[commit] no staged test file and no test file importing a staged module - no related test to run.")
+        return 0
+    files = [str(ROOT / rel) for rel in related]
+    return _run([sys.executable, "-m", "pytest", "-q", "--rootdir=.", "--confcutdir=.", *files], TESTS_DIR)
 
 
 def l0(update_baseline: bool = False) -> int:
@@ -95,7 +126,7 @@ def l0(update_baseline: bool = False) -> int:
     return 0
 
 
-GATES = {"g1": g1, "g2": g2, "g3": g3, "l0": l0}
+GATES = {"g1": g1, "g2": g2, "g3": g3, "commit": commit, "l0": l0}
 
 
 def main() -> int:
