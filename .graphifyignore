@@ -81,3 +81,7 @@ impeccable-out/
 
 # Backup files created by propagation scripts
 *.bak-*
+
+# Determinism-canary fixtures: deliberately broken checker inputs stored as *.<ext>.txt.
+# Tracked in git as quality-gate test data, but not source — noise for a code-navigation graph.
+**/determinism-canaries/
